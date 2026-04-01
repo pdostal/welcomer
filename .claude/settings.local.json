@@ -9,7 +9,11 @@
       "Bash(rm /Users/pdostal/data/mine/welcomer/main.py)",
       "Bash(git init:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(gh:*)",
+      "Bash(brew install:*)",
+      "Bash(taplo fmt:*)",
+      "Bash(git push:*)"
     ]
   }
 }

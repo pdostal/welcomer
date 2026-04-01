@@ -7,11 +7,10 @@ from pathlib import Path
 import click
 from rich.console import Console
 from rich.markdown import Markdown
-from rich.panel import Panel
-from rich.table import Table
 
 from .config import DEFAULT_CONFIG_PATH, EXAMPLE_CONFIG_PATH, WelcomerConfig
 from .core import build_welcomes
+from .ical import fetch_recipients
 
 console = Console()
 
@@ -30,38 +29,12 @@ console = Console()
     default=False,
     help="Preview what would be sent without actually sending.",
 )
-@click.option(
-    "--title",
-    default=None,
-    help="Override the welcome title from config.",
-)
-@click.option(
-    "--message",
-    "-m",
-    default=None,
-    help="Override the welcome message template from config.",
-)
-@click.option(
-    "--recipient",
-    "-r",
-    multiple=True,
-    help="Add recipient name(s) on the fly (repeatable).",
-)
-@click.option(
-    "--channel",
-    multiple=True,
-    help="Override channels (repeatable).",
-)
 @click.version_option()
 def main(
     config: Path | None,
     dry_run: bool,
-    title: str | None,
-    message: str | None,
-    recipient: tuple[str, ...],
-    channel: tuple[str, ...],
 ) -> None:
-    """Send configurable welcome messages to recipients across channels.
+    """Send configurable welcome messages loaded from iCal calendar URLs.
 
     Reads configuration from a TOML file (config.toml by default).
     Copy config.example.toml to config.toml and edit to get started.
@@ -80,50 +53,35 @@ def main(
 
     cfg = WelcomerConfig.from_file(config_path)
 
-    # Apply CLI overrides
-    if title:
-        cfg.title = title
-    if message:
-        cfg.message = message
-    if channel:
-        cfg.channels = list(channel)
-    if recipient:
-        from .config import RecipientConfig
-        extra = [RecipientConfig(name=n) for n in recipient]
-        cfg.recipients = cfg.recipients + extra
-
-    if not cfg.recipients:
-        console.print("[yellow]No recipients configured. Add some in config.toml or use --recipient.[/]")
+    if not cfg.calendars:
+        console.print(
+            "[yellow]No calendars configured. Add [[calendars]] entries in config.toml.[/]"
+        )
         raise SystemExit(0)
 
-    results = build_welcomes(cfg, dry_run=dry_run)
+    recipients = []
+    for cal in cfg.calendars:
+        label = cal.name or cal.url
+        try:
+            found = fetch_recipients(cal.url)
+            console.print(f"[dim]Loaded {len(found)} recipient(s) from {label}[/dim]")
+            recipients.extend(found)
+        except Exception as e:
+            console.print(f"[red]Failed to load {label}:[/red] {e}")
 
-    # Render title + optional header markdown
-    header_md = cfg.raw.get("header_markdown", "")
-    console.print()
-    console.print(Panel(f"[bold]{cfg.title}[/bold]", expand=False))
-    if header_md:
-        console.print(Markdown(header_md))
-    console.print()
+    if not recipients:
+        console.print("[yellow]No recipients found in any calendar.[/]")
+        raise SystemExit(0)
 
-    if dry_run:
-        console.print("[bold yellow]DRY RUN[/bold yellow] — nothing will be sent.\n")
+    results = build_welcomes(cfg, recipients, dry_run=dry_run)
 
-    table = Table(show_header=True, header_style="bold cyan")
-    table.add_column("Recipient")
-    table.add_column("Channel")
-    table.add_column("Message")
+    dry_tag = " [yellow](dry run)[/yellow]" if dry_run else ""
 
     for r in results:
-        table.add_row(r.recipient, r.channel, r.rendered_message)
+        console.print(f"\n[bold cyan]{r.subject}[/bold cyan]{dry_tag}")
+        console.print(f"[dim]To: {r.recipient} <{r.email}>[/dim]")
+        console.print(Markdown(r.body))
 
-    console.print(table)
-
-    if cfg.footer:
-        console.print()
-        console.print(Markdown(cfg.footer))
-
-    if not dry_run:
-        console.print(f"\n[green]Sent {len(results)} welcome message(s).[/green]")
-    else:
-        console.print(f"\n[yellow]Would send {len(results)} welcome message(s).[/yellow]")
+    count_color = "yellow" if dry_run else "green"
+    verb = "Would send" if dry_run else "Sent"
+    console.print(f"[{count_color}]{verb} {len(results)} message(s).[/{count_color}]")

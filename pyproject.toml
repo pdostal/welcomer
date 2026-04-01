@@ -4,9 +4,11 @@ version = "0.1.0"
 description = "A configurable welcome message tool"
 requires-python = ">=3.14"
 dependencies = [
-    "click>=8.3.1",
-    "rich>=14.3.3",
-    "tomli-w>=1.2.0",
+  "click>=8.3.1",
+  "httpx>=0.28.1",
+  "icalendar>=7.0.3",
+  "rich>=14.3.3",
+  "tomli-w>=1.2.0",
 ]
 
 [project.scripts]
@@ -20,9 +22,19 @@ build-backend = "hatchling.build"
 packages = ["src/welcomer"]
 
 [dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-]
+dev = ["black>=26.3.1", "mdformat>=1.0.0", "pytest>=9.0.2", "ruff>=0.15.8"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.black]
+line-length = 100
+
+[tool.mdformat]
+wrap = 100

@@ -4,41 +4,42 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .config import RecipientConfig, WelcomerConfig
+from .config import WelcomerConfig
+from .ical import Recipient
 
 
 @dataclass
 class WelcomeResult:
     recipient: str
-    channel: str
-    rendered_message: str
+    email: str
+    subject: str
+    body: str
     dry_run: bool
 
 
-def render_message(template: str, recipient: RecipientConfig) -> str:
-    """Render a message template for a recipient."""
-    ctx = {"name": recipient.name, **recipient.extra}
+def _render(template: str, recipient: Recipient) -> str:
+    ctx = {
+        "name": recipient.name,
+        "email": recipient.email,
+        "start": str(recipient.start or ""),
+        "end": str(recipient.end or ""),
+        **recipient.extra,
+    }
     return template.format_map(ctx)
 
 
-def build_welcomes(config: WelcomerConfig, dry_run: bool = False) -> list[WelcomeResult]:
-    """Build welcome results for all recipients and channels."""
-    results: list[WelcomeResult] = []
-    channels = config.channels if config.channels else ["default"]
-
-    for recipient in config.recipients:
-        active_channels = recipient.tags if recipient.tags else channels
-        for channel in active_channels:
-            if channel not in channels and channel not in recipient.tags:
-                continue
-            rendered = render_message(config.message, recipient)
-            results.append(
-                WelcomeResult(
-                    recipient=recipient.name,
-                    channel=channel,
-                    rendered_message=rendered,
-                    dry_run=dry_run,
-                )
-            )
-
-    return results
+def build_welcomes(
+    config: WelcomerConfig,
+    recipients: list[Recipient],
+    dry_run: bool = False,
+) -> list[WelcomeResult]:
+    return [
+        WelcomeResult(
+            recipient=recipient.name,
+            email=recipient.email,
+            subject=_render(config.subject, recipient),
+            body=_render(config.body, recipient),
+            dry_run=dry_run,
+        )
+        for recipient in recipients
+    ]

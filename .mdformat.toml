@@ -1,0 +1,2 @@
+wrap = 100
+exclude = [".venv", ".pytest_cache"]

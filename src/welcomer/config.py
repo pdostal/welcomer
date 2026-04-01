@@ -9,43 +9,33 @@ from typing import Any
 
 
 @dataclass
-class RecipientConfig:
-    name: str
-    tags: list[str] = field(default_factory=list)
-    extra: dict[str, Any] = field(default_factory=dict)
+class CalendarConfig:
+    url: str
+    name: str = ""
 
 
 @dataclass
 class WelcomerConfig:
-    title: str = "Welcome"
-    message: str = "Hello, {name}!"
-    footer: str = ""
-    recipients: list[RecipientConfig] = field(default_factory=list)
-    channels: list[str] = field(default_factory=list)
+    subject: str = "Welcome"
+    body: str = "Hello, {name}!"
+    calendars: list[CalendarConfig] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_file(cls, path: Path) -> "WelcomerConfig":
+    def from_file(cls, path: Path) -> WelcomerConfig:
         with open(path, "rb") as f:
             data = tomllib.load(f)
         return cls.from_dict(data)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "WelcomerConfig":
-        recipients = [
-            RecipientConfig(
-                name=r["name"],
-                tags=r.get("tags", []),
-                extra={k: v for k, v in r.items() if k not in ("name", "tags")},
-            )
-            for r in data.get("recipients", [])
+    def from_dict(cls, data: dict[str, Any]) -> WelcomerConfig:
+        calendars = [
+            CalendarConfig(url=c["url"], name=c.get("name", "")) for c in data.get("calendars", [])
         ]
         return cls(
-            title=data.get("title", "Welcome"),
-            message=data.get("message", "Hello, {name}!"),
-            footer=data.get("footer", ""),
-            recipients=recipients,
-            channels=data.get("channels", []),
+            subject=data.get("subject", "Welcome"),
+            body=data.get("body", "Hello, {name}!"),
+            calendars=calendars,
             raw=data,
         )
 
