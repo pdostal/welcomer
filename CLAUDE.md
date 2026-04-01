@@ -8,7 +8,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Run the app
 uv run welcomer --help
 uv run welcomer --dry-run
-uv run welcomer --config config.toml
 
 # Tests
 uv run pytest -v
