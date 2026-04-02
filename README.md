@@ -4,10 +4,10 @@ Sends configurable welcome emails to guests loaded from iCal calendar URLs. Buil
 businesses — reads reservations from a calendar and emails each guest a personalised welcome
 message.
 
-## Docker
+## Container
 
 ```sh
-docker run --rm \
+podman run --rm \
   -v ~/.config/welcomer.toml:/root/.config/welcomer.toml:ro \
   ghcr.io/pdostal/welcomer --dry-run
 ```

@@ -9,6 +9,9 @@ repository.
 # Run the app
 uv run welcomer --help
 uv run welcomer --dry-run
+uv run welcomer --dry-run --test-calendar   # use bundled fixture, no network needed
+uv run welcomer --dry-run --print-note      # also show rendered subject + body
+uv run welcomer --config ~/.config/welcomer.toml --dry-run
 
 # Tests
 uv run pytest -v
@@ -24,6 +27,12 @@ uv run --with yamllint yamllint .
 
 # Build
 uv build
+
+# Release (creates GitHub release + container tags automatically)
+# 1. bump version in pyproject.toml
+# 2. add ## [X.Y.Z] section to CHANGELOG.md
+# 3. commit, tag, push:
+git tag vX.Y.Z && git push && git push origin vX.Y.Z
 ```
 
 ## Purpose
@@ -67,7 +76,35 @@ Both paths are excluded from git. Copy `config.example.toml` to either location 
 
 Message template variables: `{name}`, `{email}`, `{phone}`, `{start}`, `{end}`, `{summary}`.
 
+## CLI flags
+
+- `--config / -c PATH` — override config file path
+- `--dry-run` — preview output, don't send
+- `--test-calendar` — use bundled `src/welcomer/data/cal.ics` fixture (requires `--dry-run`)
+- `--print-note` — also render subject + markdown body per guest
+
+## Test fixtures
+
+- `tests/fixtures/cal.ics` — real e-chalupy.cz reservation calendar (2 guests, used in tests)
+- `src/welcomer/data/cal.ics` — same file, packaged as resource for `--test-calendar` at runtime
+
+Both files must be kept in sync. When updating the fixture, copy to both locations.
+
+## Container
+
+Published to `ghcr.io/pdostal/welcomer`. Built from `Dockerfile` (multi-stage: uv builder →
+`python:3.14-slim` runtime). Use podman to run:
+
+```sh
+podman run --rm \
+  -v ~/.config/welcomer.toml:/root/.config/welcomer.toml:ro \
+  ghcr.io/pdostal/welcomer --dry-run
+```
+
+Tags: `latest` (master), `X.Y.Z` and `X.Y` (on version tags).
+
 ## CI
 
-GitHub Actions runs three parallel jobs on every push/PR: **Lint**, **Test**, **Build**. Dependabot
-updates pip and action versions weekly.
+GitHub Actions on every push/PR: **Lint**, **Test**, **Build** (parallel). On `v*` tags: **Publish**
+(container → ghcr.io) then **GitHub release** (body from `CHANGELOG.md`). Dependabot updates pip,
+GitHub Actions, and Docker base image weekly.
