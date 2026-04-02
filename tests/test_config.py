@@ -1,8 +1,9 @@
 """Tests for config loading."""
 
 import pytest
+from unittest.mock import patch
 
-from welcomer.config import WelcomerConfig
+from welcomer.config import WelcomerConfig, find_default_config
 
 SAMPLE = {
     "subject": "Hello {name}!",
@@ -64,3 +65,37 @@ def test_from_file_invalid_toml(tmp_path):
     bad.write_text("subject = [unclosed", encoding="utf-8")
     with pytest.raises(tomllib.TOMLDecodeError):
         WelcomerConfig.from_file(bad)
+
+
+def test_find_default_config_local_takes_priority(tmp_path):
+    local = tmp_path / "config.toml"
+    xdg = tmp_path / "welcomer.toml"
+    local.touch()
+    xdg.touch()
+    with (
+        patch("welcomer.config.LOCAL_CONFIG_PATH", local),
+        patch("welcomer.config.XDG_CONFIG_PATH", xdg),
+    ):
+        assert find_default_config() == local
+
+
+def test_find_default_config_falls_back_to_xdg(tmp_path):
+    local = tmp_path / "config.toml"
+    xdg = tmp_path / "welcomer.toml"
+    xdg.touch()
+    with (
+        patch("welcomer.config.LOCAL_CONFIG_PATH", local),
+        patch("welcomer.config.XDG_CONFIG_PATH", xdg),
+    ):
+        assert find_default_config() == xdg
+
+
+def test_find_default_config_neither_exists(tmp_path):
+    local = tmp_path / "config.toml"
+    xdg = tmp_path / "welcomer.toml"
+    with (
+        patch("welcomer.config.LOCAL_CONFIG_PATH", local),
+        patch("welcomer.config.XDG_CONFIG_PATH", xdg),
+    ):
+        # Returns xdg path even when missing (caller handles the missing file)
+        assert find_default_config() == xdg

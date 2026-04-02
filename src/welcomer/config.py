@@ -40,5 +40,16 @@ class WelcomerConfig:
         )
 
 
-DEFAULT_CONFIG_PATH = Path("config.toml")
+LOCAL_CONFIG_PATH = Path("config.toml")
+XDG_CONFIG_PATH = Path.home() / ".config" / "welcomer.toml"
 EXAMPLE_CONFIG_PATH = Path("config.example.toml")
+
+
+def find_default_config() -> Path:
+    """Return the default config path.
+
+    Local config.toml takes priority, then ~/.config/welcomer.toml.
+    """
+    if LOCAL_CONFIG_PATH.exists():
+        return LOCAL_CONFIG_PATH
+    return XDG_CONFIG_PATH

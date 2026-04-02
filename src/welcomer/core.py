@@ -23,6 +23,7 @@ def _render(template: str, recipient: Recipient) -> str:
         "email": recipient.email,
         "start": str(recipient.start or ""),
         "end": str(recipient.end or ""),
+        "phone": recipient.phone or "unknown",
         **recipient.extra,
     }
     return template.format_map(ctx)

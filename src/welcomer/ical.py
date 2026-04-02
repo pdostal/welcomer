@@ -16,6 +16,7 @@ class Recipient:
     email: str
     start: date | None = None
     end: date | None = None
+    phone: str = ""
     extra: dict = field(default_factory=dict)
 
 
@@ -41,6 +42,18 @@ def _extract_cn(prop) -> str:
     return str(params.get("CN", "")).strip('"')
 
 
+def _email_from_description(description: str) -> str:
+    """Extract email address from a Description field containing 'Email: ...'."""
+    m = re.search(r"Email:\s*([^\s\\,;\n]+)", description, re.IGNORECASE)
+    return m.group(1) if m else ""
+
+
+def _phone_from_description(description: str) -> str:
+    """Extract phone number from a Description field containing 'Telefon: ...'."""
+    m = re.search(r"Telefon:\s*([^\s\\,;\n]+)", description, re.IGNORECASE)
+    return m.group(1) if m else ""
+
+
 def recipients_from_ical(data: bytes) -> list[Recipient]:
     """Parse iCal bytes and return a Recipient per attendee per event."""
     cal = Calendar.from_ical(data)
@@ -54,6 +67,9 @@ def recipients_from_ical(data: bytes) -> list[Recipient]:
         start = _to_date(event.get("DTSTART").dt if event.get("DTSTART") else None)
         end = _to_date(event.get("DTEND").dt if event.get("DTEND") else None)
         summary = str(event.get("SUMMARY", ""))
+
+        description = str(event.get("DESCRIPTION", ""))
+        phone = _phone_from_description(description)
 
         attendees = event.get("ATTENDEE")
         if attendees is None:
@@ -70,6 +86,7 @@ def recipients_from_ical(data: bytes) -> list[Recipient]:
                     email=email,
                     start=start,
                     end=end,
+                    phone=phone,
                     extra={"summary": summary},
                 )
             )
@@ -86,9 +103,24 @@ def recipients_from_ical(data: bytes) -> list[Recipient]:
                         email=email,
                         start=start,
                         end=end,
+                        phone=phone,
                         extra={"summary": summary},
                     )
                 )
+            else:
+                # Last resort: name from SUMMARY, email from Description
+                email = _email_from_description(description)
+                if summary or email:
+                    results.append(
+                        Recipient(
+                            name=summary,
+                            email=email,
+                            start=start,
+                            end=end,
+                            phone=phone,
+                            extra={"summary": summary},
+                        )
+                    )
 
     return results
 

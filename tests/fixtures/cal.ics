@@ -1,0 +1,27 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//e-chalupy.cz//Zap Calendar 1.0//CZ
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+DTSTART:20260417T140000
+DTEND:20260419T100000
+SUMMARY:Josef Novák
+UID:1133-11666998@e-chalupy.cz
+DTSTAMP:20260122T140000
+STATUS:CONFIRMED
+Description:Telefon: +420123123123\nEmail: josef@novak.cz\nDospělí: 9\, 
+ děti 2\záloh 1000 cena 4000\n\nDobrý den\, máte v uvede
+ ném termínu volno? Děkuji Josef Novák
+END:VEVENT
+BEGIN:VEVENT
+DTSTART:20260611T140000
+DTEND:20260613T100000
+SUMMARY:Tomáš Jedno
+UID:1133-33666111@e-chalupy.cz
+DTSTAMP:20260302T140000
+STATUS:CONFIRMED
+Description:Telefon: +420773000123\nEmail: tomas.jedno@tiscali.cz\nDospělí: 2\, 
+ děti 7\záloh 1000 cena 4500
+END:VEVENT
+END:VCALENDAR

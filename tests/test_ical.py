@@ -1,6 +1,7 @@
 """Tests for iCal parsing."""
 
 from datetime import UTC, date, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -14,6 +15,8 @@ from welcomer.ical import (
     fetch_recipients,
     recipients_from_ical,
 )
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 ICAL_WITH_ATTENDEES = b"""\
 BEGIN:VCALENDAR
@@ -267,3 +270,43 @@ def test_fetch_recipients_raises_on_timeout():
         pytest.raises(httpx.TimeoutException),
     ):
         fetch_recipients("https://example.com/cal.ics")
+
+
+# --- tests against the real fixture (e-chalupy.cz format) ---
+
+
+def test_echalupy_fixture_count():
+    data = (FIXTURES / "cal.ics").read_bytes()
+    recipients = recipients_from_ical(data)
+    assert len(recipients) == 2
+
+
+def test_echalupy_names_from_summary():
+    data = (FIXTURES / "cal.ics").read_bytes()
+    names = {r.name for r in recipients_from_ical(data)}
+    assert "Josef Novák" in names
+    assert "Tomáš Jedno" in names
+
+
+def test_echalupy_emails_from_description():
+    data = (FIXTURES / "cal.ics").read_bytes()
+    emails = {r.email for r in recipients_from_ical(data)}
+    assert "josef@novak.cz" in emails
+    assert "tomas.jedno@tiscali.cz" in emails
+
+
+def test_echalupy_phones_from_description():
+    data = (FIXTURES / "cal.ics").read_bytes()
+    by_name = {r.name: r for r in recipients_from_ical(data)}
+    assert by_name["Josef Novák"].phone == "+420123123123"
+    assert by_name["Tomáš Jedno"].phone == "+420773000123"
+
+
+def test_echalupy_dates():
+    data = (FIXTURES / "cal.ics").read_bytes()
+    recipients = recipients_from_ical(data)
+    by_name = {r.name: r for r in recipients}
+    assert by_name["Josef Novák"].start == date(2026, 4, 17)
+    assert by_name["Josef Novák"].end == date(2026, 4, 19)
+    assert by_name["Tomáš Jedno"].start == date(2026, 6, 11)
+    assert by_name["Tomáš Jedno"].end == date(2026, 6, 13)

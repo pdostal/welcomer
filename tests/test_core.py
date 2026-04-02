@@ -34,6 +34,16 @@ def test_render_dates():
     assert _render("{start} to {end}", r) == "2026-04-01 to 2026-04-08"
 
 
+def test_render_phone():
+    r = make_recipient(phone="+420123456789")
+    assert _render("Call {phone}", r) == "Call +420123456789"
+
+
+def test_render_phone_unknown():
+    r = make_recipient()  # phone defaults to ""
+    assert _render("Call {phone}", r) == "Call unknown"
+
+
 def test_build_welcomes_subject_and_body():
     cfg = make_cfg(subject="Hi {name}", body="Welcome {email}")
     results = build_welcomes(cfg, [make_recipient()])

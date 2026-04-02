@@ -26,6 +26,13 @@ uv run --with yamllint yamllint .
 uv build
 ```
 
+## Purpose
+
+Accommodation business tool. Reads guest reservations from iCal calendar URLs and sends each guest
+a personalised welcome email. The test fixture (`tests/fixtures/cal.ics`,
+`src/welcomer/data/cal.ics`) uses the e-chalupy.cz format where guest name is in `SUMMARY` and
+contact details (email, phone) are embedded in the `Description` field.
+
 ## Architecture
 
 The app loads iCal calendar URLs from config, extracts recipients from calendar events, renders a
@@ -37,21 +44,28 @@ Data flows through three layers:
    (markdown template), and a list of `CalendarConfig` (url + name).
 
 1. **`ical.py`** — fetches each calendar URL with `httpx`, parses with `icalendar`, and returns
-   `Recipient` objects (name, email, start, end, extra). Extracts from `ATTENDEE` entries; falls
-   back to `ORGANIZER` if none.
+   `Recipient` objects (name, email, phone, start, end, extra). Extracts from `ATTENDEE` entries;
+   falls back to `ORGANIZER`; last resort uses `SUMMARY` + `Description` parsing (`Email:`,
+   `Telefon:`). Phone is extracted from `Description` for all paths.
 
-1. **`core.py`** — calls `_render()` to interpolate `{name}`, `{email}`, `{start}`, `{end}`,
-   `{summary}` into `subject`/`body`, producing `WelcomeResult` objects.
+1. **`core.py`** — calls `_render()` to interpolate `{name}`, `{email}`, `{phone}`, `{start}`,
+   `{end}`, `{summary}` into `subject`/`body`, producing `WelcomeResult` objects.
 
-**`cli.py`** wires it all together via Click. It's the only place that does I/O (HTTP fetches + Rich
-console output). Markdown body is rendered via `rich.Markdown`.
+**`cli.py`** wires it all together via Click. Default output: one compact line per recipient (name,
+dates, email, phone). Add `--print-note` to also render the subject and markdown body. Markdown
+rendered via `rich.Markdown`.
 
 ## Config format
 
-`config.toml` is excluded from git (copy from `config.example.toml`). Keys: `subject`, `body`
-(multiline TOML string, markdown), `[[calendars]]` array with `url` and `name`.
+Config is loaded from the first path that exists, in priority order:
 
-Message template variables: `{name}`, `{email}`, `{start}`, `{end}`, `{summary}`.
+1. `config.toml` in the current working directory
+2. `~/.config/welcomer.toml`
+
+Both paths are excluded from git. Copy `config.example.toml` to either location and edit it.
+Keys: `subject`, `body` (multiline TOML string, markdown), `[[calendars]]` array with `url` and `name`.
+
+Message template variables: `{name}`, `{email}`, `{phone}`, `{start}`, `{end}`, `{summary}`.
 
 ## CI
 

@@ -1,30 +1,23 @@
 # Welcomer Configuration
-# Copy this file to config.toml and edit to your needs.
+# Copy this file to config.toml (or ~/.config/welcomer.toml) and edit to your needs.
 
-subject = "Welcome to Our Team, {name}!"
+subject = "Reservation confirmed – {name}"
 
 # Multiline markdown body
-# Available variables: {name}, {email}, {start}, {end}, {summary}
+# Available variables: {name}, {email}, {phone}, {start}, {end}, {summary}
 body = """
-Hi {name},
+Dear {name},
 
-We're thrilled to have you joining us from **{start}** to **{end}**.
+Thank you for your reservation from **{start}** to **{end}**.
 
-Here's what to do first:
-
-- Say hello in **#general**
-- Read the [Team Handbook](https://example.com/handbook)
-- Check out the [Engineering Docs](https://example.com/docs)
+We look forward to welcoming you. If you have any questions before your arrival,
+reach us by email at reception@example.com or by phone.
 
 See you soon!
 """
 
 # iCal calendar URLs
-# Recipients (name, email, date period) are loaded from ATTENDEE entries in each calendar's events.
+# Recipients (name, email, phone, date period) are loaded from calendar events.
 [[calendars]]
-name = "Team Onboarding"
-url = "https://example.com/calendars/onboarding.ics"
-
-[[calendars]]
-name = "New Hires"
-url = "https://example.com/calendars/new-hires.ics"
+name = "Reservations"
+url = "https://example.com/calendars/reservations.ics"

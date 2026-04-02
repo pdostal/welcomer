@@ -43,8 +43,8 @@ def test_dry_run(config_file):
     with patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS):
         result = runner.invoke(main, ["--config", str(config_file), "--dry-run"])
     assert result.exit_code == 0
-    assert "dry run" in result.output
     assert "Would send" in result.output
+    assert "Alice" in result.output
 
 
 def test_normal_run(config_file):
@@ -57,10 +57,73 @@ def test_normal_run(config_file):
     assert "Bob" in result.output
 
 
+def test_print_note(config_file):
+    runner = CliRunner()
+    with patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS):
+        result = runner.invoke(main, ["--config", str(config_file), "--dry-run", "--print-note"])
+    assert result.exit_code == 0
+    assert "Welcome, Alice!" in result.output  # rendered subject shown
+
+
+def test_no_note_by_default(config_file):
+    runner = CliRunner()
+    with patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS):
+        result = runner.invoke(main, ["--config", str(config_file), "--dry-run"])
+    assert "glad to have you" not in result.output  # body not shown by default
+
+
 def test_missing_config():
     runner = CliRunner()
     result = runner.invoke(main, ["--config", "nonexistent.toml"])
     assert result.exit_code == 1
+
+
+def test_default_config_uses_xdg(tmp_path):
+    """When no local config.toml exists, the XDG path is used as default."""
+    xdg_config = tmp_path / "welcomer.toml"
+    xdg_config.write_text(TOML_CONTENT)
+    local_missing = tmp_path / "config.toml"  # does not exist
+    runner = CliRunner()
+    with (
+        patch("welcomer.config.LOCAL_CONFIG_PATH", local_missing),
+        patch("welcomer.config.XDG_CONFIG_PATH", xdg_config),
+        patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS),
+    ):
+        result = runner.invoke(main, [])
+    assert result.exit_code == 0
+    assert "Sent" in result.output
+
+
+def test_default_config_uses_local(tmp_path):
+    """When local config.toml exists it takes priority over the XDG path."""
+    local_config = tmp_path / "config.toml"
+    local_config.write_text(TOML_CONTENT)
+    xdg_config = tmp_path / "welcomer.toml"  # does not exist
+    runner = CliRunner()
+    with (
+        patch("welcomer.config.LOCAL_CONFIG_PATH", local_config),
+        patch("welcomer.config.XDG_CONFIG_PATH", xdg_config),
+        patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS),
+    ):
+        result = runner.invoke(main, [])
+    assert result.exit_code == 0
+    assert "Sent" in result.output
+
+
+def test_test_calendar_dry_run(config_file):
+    runner = CliRunner()
+    result = runner.invoke(main, ["--config", str(config_file), "--dry-run", "--test-calendar"])
+    assert result.exit_code == 0
+    assert "test calendar" in result.output
+    assert "Josef" in result.output
+    assert "Would send" in result.output
+
+
+def test_test_calendar_requires_dry_run(config_file):
+    runner = CliRunner()
+    result = runner.invoke(main, ["--config", str(config_file), "--test-calendar"])
+    assert result.exit_code == 2
+    assert "--test-calendar requires --dry-run" in result.output
 
 
 def test_fetch_failure(config_file):
