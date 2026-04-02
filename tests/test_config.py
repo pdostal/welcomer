@@ -1,7 +1,8 @@
 """Tests for config loading."""
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from welcomer.config import WelcomerConfig, find_default_config
 
