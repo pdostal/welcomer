@@ -1,5 +1,7 @@
 """Tests for config loading."""
 
+import pytest
+
 from welcomer.config import WelcomerConfig
 
 SAMPLE = {
@@ -43,3 +45,22 @@ def test_from_file(tmp_path):
     cfg = WelcomerConfig.from_file(toml)
     assert cfg.subject == "Loaded"
     assert cfg.calendars[0].url == "https://example.com/cal.ics"
+
+
+def test_raw_preserved():
+    cfg = WelcomerConfig.from_dict(SAMPLE)
+    assert cfg.raw == SAMPLE
+
+
+def test_from_file_missing_raises():
+    with pytest.raises(FileNotFoundError):
+        WelcomerConfig.from_file("/nonexistent/path/config.toml")
+
+
+def test_from_file_invalid_toml(tmp_path):
+    import tomllib
+
+    bad = tmp_path / "bad.toml"
+    bad.write_text("subject = [unclosed", encoding="utf-8")
+    with pytest.raises(tomllib.TOMLDecodeError):
+        WelcomerConfig.from_file(bad)
