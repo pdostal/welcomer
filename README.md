@@ -1,8 +1,18 @@
 # welcomer
 
-Sends configurable welcome emails to guests loaded from iCal calendar URLs.
-Built for accommodation businesses — reads reservations from a calendar and
-emails each guest a personalised welcome message.
+Sends configurable welcome emails to guests loaded from iCal calendar URLs. Built for accommodation
+businesses — reads reservations from a calendar and emails each guest a personalised welcome
+message.
+
+## Docker
+
+```sh
+docker run --rm \
+  -v ~/.config/welcomer.toml:/root/.config/welcomer.toml:ro \
+  ghcr.io/pdostal/welcomer --dry-run
+```
+
+`latest` is updated on every push to `master`. Tagged releases follow `vX.Y.Z`.
 
 ## Setup
 
@@ -27,7 +37,7 @@ uv run welcomer --dry-run --test-calendar  # test with bundled sample calendar
 Config is loaded from the first path that exists:
 
 1. `config.toml` in the current directory
-2. `~/.config/welcomer.toml`
+1. `~/.config/welcomer.toml`
 
 Example (`config.example.toml`):
 
@@ -51,7 +61,7 @@ Template variables: `{name}`, `{email}`, `{phone}`, `{start}`, `{end}`, `{summar
 Recipients are extracted from calendar events in this order:
 
 1. `ATTENDEE` entries
-2. `ORGANIZER` if no attendees
-3. `SUMMARY` (name) + `Description` field (email via `Email:`, phone via `Telefon:`) as last resort
+1. `ORGANIZER` if no attendees
+1. `SUMMARY` (name) + `Description` field (email via `Email:`, phone via `Telefon:`) as last resort
 
 Phone and email parsed from `Description` are available in all three cases.

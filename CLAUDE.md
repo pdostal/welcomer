@@ -28,10 +28,10 @@ uv build
 
 ## Purpose
 
-Accommodation business tool. Reads guest reservations from iCal calendar URLs and sends each guest
-a personalised welcome email. The test fixture (`tests/fixtures/cal.ics`,
-`src/welcomer/data/cal.ics`) uses the e-chalupy.cz format where guest name is in `SUMMARY` and
-contact details (email, phone) are embedded in the `Description` field.
+Accommodation business tool. Reads guest reservations from iCal calendar URLs and sends each guest a
+personalised welcome email. The test fixture (`tests/fixtures/cal.ics`, `src/welcomer/data/cal.ics`)
+uses the e-chalupy.cz format where guest name is in `SUMMARY` and contact details (email, phone) are
+embedded in the `Description` field.
 
 ## Architecture
 
@@ -60,10 +60,10 @@ rendered via `rich.Markdown`.
 Config is loaded from the first path that exists, in priority order:
 
 1. `config.toml` in the current working directory
-2. `~/.config/welcomer.toml`
+1. `~/.config/welcomer.toml`
 
-Both paths are excluded from git. Copy `config.example.toml` to either location and edit it.
-Keys: `subject`, `body` (multiline TOML string, markdown), `[[calendars]]` array with `url` and `name`.
+Both paths are excluded from git. Copy `config.example.toml` to either location and edit it. Keys:
+`subject`, `body` (multiline TOML string, markdown), `[[calendars]]` array with `url` and `name`.
 
 Message template variables: `{name}`, `{email}`, `{phone}`, `{start}`, `{end}`, `{summary}`.
 
