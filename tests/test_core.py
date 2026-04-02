@@ -60,3 +60,29 @@ def test_build_welcomes_multiple_recipients():
 def test_build_welcomes_empty():
     cfg = make_cfg()
     assert build_welcomes(cfg, []) == []
+
+
+def test_render_none_dates_produce_empty_strings():
+    r = make_recipient(start=None, end=None)
+    assert _render("{start}/{end}", r) == "/"
+
+
+def test_render_summary_from_extra():
+    r = make_recipient(extra={"summary": "Onboarding Week"})
+    assert _render("{summary}", r) == "Onboarding Week"
+
+
+def test_build_welcomes_not_dry_run_by_default():
+    cfg = make_cfg()
+    results = build_welcomes(cfg, [make_recipient()])
+    assert results[0].dry_run is False
+
+
+def test_build_welcomes_result_fields():
+    cfg = make_cfg(subject="Hello {name}", body="Welcome {email}")
+    r = make_recipient(name="Alice", email="alice@example.com")
+    result = build_welcomes(cfg, [r])[0]
+    assert result.recipient == "Alice"
+    assert result.email == "alice@example.com"
+    assert result.subject == "Hello Alice"
+    assert result.body == "Welcome alice@example.com"

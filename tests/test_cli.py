@@ -69,3 +69,50 @@ def test_fetch_failure(config_file):
         result = runner.invoke(main, ["--config", str(config_file)])
     assert "Failed to load" in result.output
     assert result.exit_code == 0
+
+
+def test_no_calendars_exits_zero(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text('subject = "Hi"\nbody = "Hello"\n', encoding="utf-8")
+    runner = CliRunner()
+    result = runner.invoke(main, ["--config", str(p)])
+    assert result.exit_code == 0
+    assert "No calendars" in result.output
+
+
+def test_no_recipients_exits_zero(config_file):
+    runner = CliRunner()
+    with patch("welcomer.cli.fetch_recipients", return_value=[]):
+        result = runner.invoke(main, ["--config", str(config_file)])
+    assert result.exit_code == 0
+    assert "No recipients" in result.output
+
+
+def test_multiple_calendars_partial_failure(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text(
+        'subject = "Hi {name}"\nbody = "Hello {name}"\n\n'
+        '[[calendars]]\nname = "Good"\nurl = "https://example.com/good.ics"\n\n'
+        '[[calendars]]\nname = "Bad"\nurl = "https://example.com/bad.ics"\n',
+        encoding="utf-8",
+    )
+    good_recipients = [Recipient(name="Alice", email="alice@example.com")]
+
+    def side_effect(url):
+        if "good" in url:
+            return good_recipients
+        raise Exception("unreachable")
+
+    runner = CliRunner()
+    with patch("welcomer.cli.fetch_recipients", side_effect=side_effect):
+        result = runner.invoke(main, ["--config", str(p)])
+    assert result.exit_code == 0
+    assert "Failed to load" in result.output
+    assert "Sent 1" in result.output
+
+
+def test_version():
+    runner = CliRunner()
+    result = runner.invoke(main, ["--version"])
+    assert result.exit_code == 0
+    assert "version" in result.output.lower()
