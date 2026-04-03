@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-04-03
+
+### Added
+
+- **`--test-config` flag** — replaces `--test-calendar`; loads a bundled test config with 3
+  fictional properties (The Tipsy Gnome/NapHub, Biscuit Château/SnoozePal, The Snoring
+  Goat/SnoozePal) and 6 guests across 3 ICS fixtures
+- **`provider` field** on `[[calendars]]` config entries; `{provider}` template variable available
+  in subject/body
+- **`{property}` template variable** — set from the calendar `name` field
+- **`--property` and `--provider` filters** — case-insensitive substring match; skip calendars that
+  don't match
+- **`--days N` filter** — only show reservations starting within N days from today (inactive by
+  default)
+- **`date_format` config field** — strftime format string for date display (default `%Y-%m-%d`);
+  test config uses `%d. %m. %Y`
+- **Aligned tabular output** — columns (Name, From, To, Duration, Calendar, E-mail, Phone) with
+  emoji headers; sorted by start date → end date → property → provider
+- **Path support in calendar `url`** — accepts absolute and relative file paths in addition to
+  HTTP(S) URLs; relative paths resolve against the config file's directory
+- **Expanded test suite** — sort order, sort tiebreakers, filter edge cases, `--days` with mocked
+  today
+
+### Changed
+
+- `--test-calendar` renamed to `--test-config`
+
 ## [0.1.1] - 2026-04-02
 
 ### Added
