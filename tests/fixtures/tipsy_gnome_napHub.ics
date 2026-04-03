@@ -1,0 +1,26 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//e-chalupy.cz//Zap Calendar 1.0//CZ
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+DTSTART:20260503T140000
+DTEND:20260510T100000
+SUMMARY:Martina Procházková
+UID:2241-55781234@e-chalupy.cz
+DTSTAMP:20260201T090000
+STATUS:CONFIRMED
+Description:Telefon: +420601234567\nEmail: martina.prochazka@email.cz\nDospělí: 2\,
+ děti 1\záloh 1500 cena 5500\n\nDobrý den\, máte v uvedeném termínu volno? Díky
+END:VEVENT
+BEGIN:VEVENT
+DTSTART:20260715T140000
+DTEND:20260722T100000
+SUMMARY:Lukáš Beneš
+UID:2241-66892345@e-chalupy.cz
+DTSTAMP:20260310T120000
+STATUS:CONFIRMED
+Description:Telefon: +420602345678\nEmail: lukas.benes@gmail.com\nDospělí: 4\,
+ děti 0\záloh 2000 cena 7000
+END:VEVENT
+END:VCALENDAR

@@ -9,7 +9,7 @@ repository.
 # Run the app
 uv run welcomer --help
 uv run welcomer --dry-run
-uv run welcomer --dry-run --test-calendar   # use bundled fixture, no network needed
+uv run welcomer --dry-run --test-config    # use bundled test config + fixtures, no network needed
 uv run welcomer --dry-run --print-note      # also show rendered subject + body
 uv run welcomer --config ~/.config/welcomer.toml --dry-run
 
@@ -80,15 +80,17 @@ Message template variables: `{name}`, `{email}`, `{phone}`, `{start}`, `{end}`, 
 
 - `--config / -c PATH` — override config file path
 - `--dry-run` — preview output, don't send
-- `--test-calendar` — use bundled `src/welcomer/data/cal.ics` fixture (requires `--dry-run`)
+- `--test-config` — use bundled `src/welcomer/data/test_config.toml` + 3 property ICS fixtures (requires `--dry-run`)
 - `--print-note` — also render subject + markdown body per guest
 
 ## Test fixtures
 
-- `tests/fixtures/cal.ics` — real e-chalupy.cz reservation calendar (2 guests, used in tests)
-- `src/welcomer/data/cal.ics` — same file, packaged as resource for `--test-calendar` at runtime
+- `tests/fixtures/cal.ics` — real e-chalupy.cz reservation calendar (2 guests, used in ical tests)
+- `src/welcomer/data/cal.ics` — same file, packaged as resource (kept in sync with tests/fixtures)
+- `tests/fixtures/tipsy_gnome_napHub.ics`, `biscuit_chateau_snoozePal.ics`, `snoring_goat_snoozePal.ics` — 3 test calendars (The Tipsy Gnome/NapHub, Château du Biscuit/SnoozePal, The Snoring Goat/SnoozePal; 2 guests each, 2026 dates). Referenced directly by `--test-config` at runtime.
+- `src/welcomer/data/test_config.toml` — bundled test config referencing the 3 property ICS files
 
-Both files must be kept in sync. When updating the fixture, copy to both locations.
+When updating any fixture, copy to both `tests/fixtures/` and `src/welcomer/data/`.
 
 ## Container
 

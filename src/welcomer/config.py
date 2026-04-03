@@ -12,12 +12,14 @@ from typing import Any
 class CalendarConfig:
     url: str
     name: str = ""
+    provider: str = ""
 
 
 @dataclass
 class WelcomerConfig:
     subject: str = "Welcome"
     body: str = "Hello, {name}!"
+    date_format: str = "%Y-%m-%d"
     calendars: list[CalendarConfig] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -30,11 +32,13 @@ class WelcomerConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> WelcomerConfig:
         calendars = [
-            CalendarConfig(url=c["url"], name=c.get("name", "")) for c in data.get("calendars", [])
+            CalendarConfig(url=c["url"], name=c.get("name", ""), provider=c.get("provider", ""))
+            for c in data.get("calendars", [])
         ]
         return cls(
             subject=data.get("subject", "Welcome"),
             body=data.get("body", "Hello, {name}!"),
+            date_format=data.get("date_format", "%Y-%m-%d"),
             calendars=calendars,
             raw=data,
         )
