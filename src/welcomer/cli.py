@@ -291,9 +291,10 @@ def main(
         prop_sep = " · " if prop and provider else ""
         prop_col = f"{prop}{prop_sep}{provider}"
         eligible = rec.start is not None and rec.start <= today + timedelta(days=effective_advance)
+        display_name = "Reservation" if r.recipient == "CLOSED - Not available" else r.recipient
         rows.append(
             (
-                r.recipient,
+                display_name,
                 start,
                 end,
                 duration,
@@ -312,20 +313,19 @@ def main(
 
     rows.sort(key=lambda row: (row[10] or date.max, row[11] or date.max, row[8], row[9]))
 
+    _dates = [f"{r[1]} → {r[2]}" if r[1] and r[2] else r[1] or r[2] or "" for r in rows]
     w_name = max(max(len(row[0]) for row in rows), len("👤 Name") + 1)
-    w_from = max(max(len(row[1]) for row in rows), len("📅 From") + 1)
-    w_to = max(max(len(row[2]) for row in rows), len("🏁 To") + 1)
-    w_dur = max(max(len(row[3]) for row in rows), len("⏳ Duration") + 1)
+    w_date = max(max(len(d) for d in _dates), len("📅 Date") + 1)
+    w_dur = max(max(len(row[3]) for row in rows), len("⏳") + 1)
     w_prop = max(max(len(row[4]) for row in rows), len("🏡 Calendar") + 1)
     w_email = max(max(len(row[5]) for row in rows), len("📧 E-mail") + 1)
 
     console.print(
         f"[bold dim]"
         f"{'👤 Name':<{w_name - 1}}  "
-        f"{'📅 From':<{w_from - 1}}  "
-        f"{'🏁 To':<{w_to - 1}}  "
-        f"{'⏳ Duration':<{w_dur - 1}}  "
-        f"{'Sent':<4}  "
+        f"{'📅 Date':<{w_date - 1}}  "
+        f"{'⏳':<{w_dur - 1}}  "
+        f"{'✉️':<4}  "
         f"{'🏡 Calendar':<{w_prop - 1}}  "
         f"{'📧 E-mail':<{w_email - 1}}  "
         f"📞 Phone"
@@ -350,10 +350,10 @@ def main(
     ) in rows:
         date_color = "red" if id(rec) in overlapping_recipients else "cyan"
         already_sent = _sent_key(rec, _prop) in sent_keys
+        date_col = f"{start} → {end}" if start and end else start or end or ""
         console.print(
             f"[bold green]{name:<{w_name}}[/bold green]"
-            f"  [{date_color}]{start:<{w_from}}[/{date_color}]"
-            f"  [{date_color}]{end:<{w_to}}[/{date_color}]"
+            f"  [{date_color}]{date_col:<{w_date}}[/{date_color}]"
             f"  [{date_color}]{duration:<{w_dur}}[/{date_color}]"
             f"  {_sent_marker(email, already_sent, eligible)}"
             f"  {prop_col:<{w_prop}}"

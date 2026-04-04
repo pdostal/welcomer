@@ -86,7 +86,7 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
                     end=t + timedelta(days=_CLOSED_END),
                 ),
                 Recipient(
-                    name="Reservation",
+                    name="CLOSED - Not available",
                     email=None,
                     start=t + timedelta(days=_NAPUB_OVERLAP_START),
                     end=t + timedelta(days=_NAPUB_OVERLAP_END),
@@ -116,13 +116,13 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
             CalendarConfig(name="The Tipsy Gnome", provider="NapHub", url=""),
             [
                 Recipient(
-                    name="Reservation",
+                    name="CLOSED - Not available",
                     email=None,
                     start=t + timedelta(days=_TIPSY_1_START),
                     end=t + timedelta(days=_TIPSY_1_END),
                 ),
                 Recipient(
-                    name="Reservation",
+                    name="CLOSED - Not available",
                     email=None,
                     start=t + timedelta(days=_TIPSY_2_START),
                     end=t + timedelta(days=_TIPSY_2_END),
