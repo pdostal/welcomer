@@ -19,8 +19,7 @@ podman run --rm \
 ```sh
 brew install uv taplo
 uv sync
-cp config.example.toml config.toml
-# edit config.toml and add your calendar URL
+# copy the example config below to config.toml and edit it
 ```
 
 ## Usage
@@ -40,7 +39,7 @@ Config is loaded from the first path that exists:
 1. `config.toml` in the current directory
 1. `~/.config/welcomer/config.toml`
 
-Example (`config.example.toml`):
+Example config:
 
 ```toml
 subject = "Reservation confirmed – {name}"

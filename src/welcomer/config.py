@@ -51,7 +51,6 @@ class WelcomerConfig:
 LOCAL_CONFIG_PATH = Path("config.toml")
 XDG_CONFIG_PATH = Path.home() / ".config" / "welcomer" / "config.toml"
 SENT_LOG_PATH = Path.home() / ".config" / "welcomer" / "sent.log"
-EXAMPLE_CONFIG_PATH = Path("config.example.toml")
 
 
 def find_default_config() -> Path:

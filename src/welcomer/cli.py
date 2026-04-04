@@ -12,7 +12,6 @@ from rich.console import Console
 from rich.markdown import Markdown
 
 from .config import (
-    EXAMPLE_CONFIG_PATH,
     LOCAL_CONFIG_PATH,
     SENT_LOG_PATH,
     XDG_CONFIG_PATH,
@@ -180,7 +179,7 @@ def main(
 
     Reads configuration from a TOML file. Looks for config.toml in the current
     directory first, then falls back to ~/.config/welcomer/config.toml.
-    Copy config.example.toml to either location and edit to get started.
+    Copy the example from README.md to either location and edit to get started.
     """
     if test_config and not dry_run:
         raise click.UsageError("--test-config requires --dry-run")
@@ -208,17 +207,10 @@ def main(
         config_path = config or find_default_config()
 
         if not config_path.exists():
-            if EXAMPLE_CONFIG_PATH.exists():
-                console.print(
-                    f"[yellow]Config file not found:[/] {config_path}\n"
-                    f"[dim]Copy config.example.toml to {LOCAL_CONFIG_PATH}"
-                    f" or {XDG_CONFIG_PATH} and edit it.[/]"
-                )
-            else:
-                console.print(
-                    f"[red]Config file not found:[/] {config_path}\n"
-                    f"[dim]Expected {LOCAL_CONFIG_PATH} or {XDG_CONFIG_PATH}.[/]"
-                )
+            console.print(
+                f"[red]Config file not found:[/] {config_path}\n"
+                f"[dim]Expected {LOCAL_CONFIG_PATH} or {XDG_CONFIG_PATH}.[/]"
+            )
             raise SystemExit(1)
 
         cfg = WelcomerConfig.from_file(config_path)

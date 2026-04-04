@@ -72,7 +72,7 @@ Config is loaded from the first path that exists, in priority order:
 1. `config.toml` in the current working directory
 1. `~/.config/welcomer/config.toml`
 
-Both paths are excluded from git. Copy `config.example.toml` to either location and edit it. Keys:
+Both paths are excluded from git. Create one of these files (see README.md for an example). Keys:
 `subject`, `body` (multiline TOML string, markdown), `days` (optional int), `[[calendars]]` array
 with `url` and `name`.
 
