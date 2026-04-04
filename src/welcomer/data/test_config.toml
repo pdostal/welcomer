@@ -32,3 +32,8 @@ url = "tests/fixtures/biscuit_chateau_snoozePal.ics"
 name = "The Snoring Goat"
 provider = "SnoozePal"
 url = "tests/fixtures/snoring_goat_snoozePal.ics"
+
+[[calendars]]
+name = "Biscuit Château"
+provider = "NapHub"
+url = "tests/fixtures/biscuit_chateau_napHub.ics"

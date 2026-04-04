@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-03
+
+### Added
+
+- **`--yes` flag** — auto-sends all eligible welcome emails without prompting; writes to
+  `~/.config/welcomer/sent.log` (skips already-sent entries). Use with `--dry-run` to preview what
+  would be sent
+- **`--advance` flag and config option** — days before check-in when a reservation becomes eligible
+  (default: 14); controls which reservations the interactive and `--yes` modes act on
+- **Interactive mode** (default) — prompts before each eligible send; records confirmed sends in
+  `~/.config/welcomer/sent.log`; skips already-sent entries automatically
+- **`Sent` column** in the output table with 4-state markers: `✓` (sent), `●` (eligible, not yet
+  sent), `○` (not yet eligible), `✗` (no email)
+- **Overlap detection** — warns when two reservations for the same property have overlapping dates;
+  affected rows shown in red
+- **Config path moved** to `~/.config/welcomer/config.toml` (previously `~/.config/welcomer.toml`)
+
+### Removed
+
+- `--non-interactive` flag replaced by `--yes`
+
 ## [0.2.0] - 2026-04-03
 
 ### Added

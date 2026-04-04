@@ -20,6 +20,8 @@ class WelcomerConfig:
     subject: str = "Welcome"
     body: str = "Hello, {name}!"
     date_format: str = "%Y-%m-%d"
+    days: int | None = None
+    advance: int = 14
     calendars: list[CalendarConfig] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -39,20 +41,23 @@ class WelcomerConfig:
             subject=data.get("subject", "Welcome"),
             body=data.get("body", "Hello, {name}!"),
             date_format=data.get("date_format", "%Y-%m-%d"),
+            days=data.get("days"),
+            advance=data.get("advance", 14),
             calendars=calendars,
             raw=data,
         )
 
 
 LOCAL_CONFIG_PATH = Path("config.toml")
-XDG_CONFIG_PATH = Path.home() / ".config" / "welcomer.toml"
+XDG_CONFIG_PATH = Path.home() / ".config" / "welcomer" / "config.toml"
+SENT_LOG_PATH = Path.home() / ".config" / "welcomer" / "sent.log"
 EXAMPLE_CONFIG_PATH = Path("config.example.toml")
 
 
 def find_default_config() -> Path:
     """Return the default config path.
 
-    Local config.toml takes priority, then ~/.config/welcomer.toml.
+    Local config.toml takes priority, then ~/.config/welcomer/config.toml.
     """
     if LOCAL_CONFIG_PATH.exists():
         return LOCAL_CONFIG_PATH

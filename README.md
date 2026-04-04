@@ -8,7 +8,7 @@ message.
 
 ```sh
 podman run --rm \
-  -v ~/.config/welcomer.toml:/root/.config/welcomer.toml:ro \
+  -v ~/.config/welcomer:/root/.config/welcomer:ro \
   ghcr.io/pdostal/welcomer --dry-run
 ```
 
@@ -28,8 +28,9 @@ cp config.example.toml config.toml
 ```sh
 uv run welcomer --dry-run              # preview recipients list
 uv run welcomer --dry-run --print-note # also show rendered message per guest
-uv run welcomer                        # send
-uv run welcomer --dry-run --test-calendar  # test with bundled sample calendar
+uv run welcomer                        # interactive send (default)
+uv run welcomer --non-interactive      # send to all without prompting
+uv run welcomer --dry-run --test-config  # test with bundled sample calendars
 ```
 
 ## Config
@@ -37,12 +38,19 @@ uv run welcomer --dry-run --test-calendar  # test with bundled sample calendar
 Config is loaded from the first path that exists:
 
 1. `config.toml` in the current directory
-1. `~/.config/welcomer.toml`
+1. `~/.config/welcomer/config.toml`
 
 Example (`config.example.toml`):
 
 ```toml
 subject = "Reservation confirmed – {name}"
+
+# Only show reservations starting within this many days from today (optional)
+# days = 30
+
+# Days before check-in when a reservation becomes eligible to send (default: 14)
+# advance = 14
+
 body = """
 Dear {name},
 
@@ -55,6 +63,19 @@ url = "https://example.com/calendar.ics"
 ```
 
 Template variables: `{name}`, `{email}`, `{phone}`, `{start}`, `{end}`, `{summary}`.
+
+## Interactive mode
+
+Interactive mode is on by default. The app prompts before sending each eligible email (check-in
+within the `advance` window, default 14 days). Use `--non-interactive` to skip prompts. Previously
+sent reservations are tracked in `~/.config/welcomer/sent.log` and skipped automatically on future
+runs.
+
+The `Sent` column shows the status of each reservation:
+
+| Symbol | Colour | Meaning | | ------ | ------ | ------- | | `✓` | green | Already sent | | `●` |
+green | Eligible to send now (check-in within advance window) | | `○` | yellow | Not yet eligible
+(check-in too far away) | | `✗` | red | No email address |
 
 ## Recipient extraction
 

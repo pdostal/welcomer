@@ -68,10 +68,31 @@ def test_from_file_invalid_toml(tmp_path):
         WelcomerConfig.from_file(bad)
 
 
+def test_days_loaded_from_config():
+    cfg = WelcomerConfig.from_dict({"days": 14})
+    assert cfg.days == 14
+
+
+def test_days_defaults_to_none():
+    cfg = WelcomerConfig.from_dict({})
+    assert cfg.days is None
+
+
+def test_advance_loaded_from_config():
+    cfg = WelcomerConfig.from_dict({"advance": 7})
+    assert cfg.advance == 7
+
+
+def test_advance_defaults_to_14():
+    cfg = WelcomerConfig.from_dict({})
+    assert cfg.advance == 14
+
+
 def test_find_default_config_local_takes_priority(tmp_path):
     local = tmp_path / "config.toml"
-    xdg = tmp_path / "welcomer.toml"
+    xdg = tmp_path / "welcomer" / "config.toml"
     local.touch()
+    xdg.parent.mkdir()
     xdg.touch()
     with (
         patch("welcomer.config.LOCAL_CONFIG_PATH", local),
@@ -82,7 +103,8 @@ def test_find_default_config_local_takes_priority(tmp_path):
 
 def test_find_default_config_falls_back_to_xdg(tmp_path):
     local = tmp_path / "config.toml"
-    xdg = tmp_path / "welcomer.toml"
+    xdg = tmp_path / "welcomer" / "config.toml"
+    xdg.parent.mkdir()
     xdg.touch()
     with (
         patch("welcomer.config.LOCAL_CONFIG_PATH", local),
@@ -93,7 +115,7 @@ def test_find_default_config_falls_back_to_xdg(tmp_path):
 
 def test_find_default_config_neither_exists(tmp_path):
     local = tmp_path / "config.toml"
-    xdg = tmp_path / "welcomer.toml"
+    xdg = tmp_path / "welcomer" / "config.toml"
     with (
         patch("welcomer.config.LOCAL_CONFIG_PATH", local),
         patch("welcomer.config.XDG_CONFIG_PATH", xdg),

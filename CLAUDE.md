@@ -11,7 +11,8 @@ uv run welcomer --help
 uv run welcomer --dry-run
 uv run welcomer --dry-run --test-config    # use bundled test config + fixtures, no network needed
 uv run welcomer --dry-run --print-note      # also show rendered subject + body
-uv run welcomer --config ~/.config/welcomer.toml --dry-run
+uv run welcomer --interactive               # ask before sending each email
+uv run welcomer --config ~/.config/welcomer/config.toml --dry-run
 
 # Tests
 uv run pytest -v
@@ -50,7 +51,7 @@ subject + markdown body per recipient, and prints the result.
 Data flows through three layers:
 
 1. **`config.py`** — loads `config.toml` (TOML) into `WelcomerConfig`, which holds `subject`, `body`
-   (markdown template), and a list of `CalendarConfig` (url + name).
+   (markdown template), `days` (optional filter), and a list of `CalendarConfig` (url + name).
 
 1. **`ical.py`** — fetches each calendar URL with `httpx`, parses with `icalendar`, and returns
    `Recipient` objects (name, email, phone, start, end, extra). Extracts from `ATTENDEE` entries;
@@ -61,18 +62,19 @@ Data flows through three layers:
    `{end}`, `{summary}` into `subject`/`body`, producing `WelcomeResult` objects.
 
 **`cli.py`** wires it all together via Click. Default output: one compact line per recipient (name,
-dates, email, phone). Add `--print-note` to also render the subject and markdown body. Markdown
-rendered via `rich.Markdown`.
+dates, email, phone, sent status). Add `--print-note` to also render the subject and markdown body.
+Markdown rendered via `rich.Markdown`.
 
 ## Config format
 
 Config is loaded from the first path that exists, in priority order:
 
 1. `config.toml` in the current working directory
-1. `~/.config/welcomer.toml`
+1. `~/.config/welcomer/config.toml`
 
 Both paths are excluded from git. Copy `config.example.toml` to either location and edit it. Keys:
-`subject`, `body` (multiline TOML string, markdown), `[[calendars]]` array with `url` and `name`.
+`subject`, `body` (multiline TOML string, markdown), `days` (optional int), `[[calendars]]` array
+with `url` and `name`.
 
 Message template variables: `{name}`, `{email}`, `{phone}`, `{start}`, `{end}`, `{summary}`.
 
@@ -81,8 +83,25 @@ Message template variables: `{name}`, `{email}`, `{phone}`, `{start}`, `{end}`, 
 - `--config / -c PATH` — override config file path
 - `--dry-run` — preview output, don't send
 - `--test-config` — use bundled `src/welcomer/data/test_config.toml` + 3 property ICS fixtures
-  (requires `--dry-run`)
+  (requires `--dry-run`; automatically runs non-interactively)
+- `--interactive / --non-interactive` — ask before sending each eligible email (default: on);
+  records confirmed sends in `~/.config/welcomer/sent.log`; skips already-sent and not-yet-eligible
+  reservations
+- `--days N` — only show reservations starting within N days; overrides `days` in config
+- `--advance N` — days before check-in when a reservation becomes eligible to send (default: 14);
+  overrides `advance` in config
 - `--print-note` — also render subject + markdown body per guest
+
+## Sent log
+
+`~/.config/welcomer/sent.log` — one line per confirmed send, format:
+`{property}|{start}|{end}|{name}|{email}`. Created automatically.
+
+The `Sent` column in the output table shows one of four states:
+
+| Symbol | Colour | Meaning | |--------|--------|---------| | `✓` | green | Already sent (in
+sent.log) | | `●` | green | Eligible to send now (check-in ≤ today + advance days) | | `○` | yellow
+| Not yet eligible (check-in too far in the future) | | `✗` | red | No email address — cannot send |
 
 ## Test fixtures
 
@@ -103,7 +122,7 @@ Published to `ghcr.io/pdostal/welcomer`. Built from `Dockerfile` (multi-stage: u
 
 ```sh
 podman run --rm \
-  -v ~/.config/welcomer.toml:/root/.config/welcomer.toml:ro \
+  -v ~/.config/welcomer:/root/.config/welcomer:ro \
   ghcr.io/pdostal/welcomer --dry-run
 ```
 

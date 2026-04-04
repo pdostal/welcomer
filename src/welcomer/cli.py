@@ -14,6 +14,7 @@ from rich.markdown import Markdown
 from .config import (
     EXAMPLE_CONFIG_PATH,
     LOCAL_CONFIG_PATH,
+    SENT_LOG_PATH,
     XDG_CONFIG_PATH,
     WelcomerConfig,
     find_default_config,
@@ -22,6 +23,22 @@ from .core import build_welcomes
 from .ical import Recipient, fetch_recipients, recipients_from_ical
 
 console = Console()
+
+
+def _detect_overlaps(recipients: list[Recipient]) -> list[tuple[Recipient, Recipient]]:
+    """Return pairs with the same property whose date ranges overlap."""
+    by_property: dict[str, list[Recipient]] = {}
+    for rec in recipients:
+        prop = rec.extra.get("property", "")
+        if prop and rec.start and rec.end:
+            by_property.setdefault(prop, []).append(rec)
+    overlaps = []
+    for recs in by_property.values():
+        for i, a in enumerate(recs):
+            for b in recs[i + 1 :]:
+                if a.start < b.end and b.start < a.end:
+                    overlaps.append((a, b))
+    return overlaps
 
 
 def _apply_filters(calendars, property_filter, provider_filter):
@@ -45,6 +62,39 @@ def _load_calendar(url: str, base_dir: Path) -> list[Recipient]:
     return recipients_from_ical(path.read_bytes())
 
 
+def _sent_key(rec: Recipient, prop: str) -> str:
+    return f"{prop}|{rec.start}|{rec.end}|{rec.name}|{rec.email or ''}"
+
+
+def _load_sent_log(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    return set(path.read_text(encoding="utf-8").splitlines())
+
+
+def _append_sent_log(path: Path, key: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(key + "\n")
+
+
+def _sent_marker(email: str, already_sent: bool, eligible: bool) -> str:
+    """Return a Rich-markup sent-status cell, always 4 visible chars wide.
+
+    ✗  red    — no email address, cannot send
+    ✓  green  — already sent (in sent.log)
+    ●  green  — eligible to send now (start ≤ today + advance days), not yet sent
+    ○  yellow — not yet eligible (check-in too far in the future)
+    """
+    if email == "none":
+        return "[red]✗   [/red]"
+    if already_sent:
+        return "[green]✓   [/green]"
+    if eligible:
+        return "[green]●   [/green]"
+    return "[yellow]○   [/yellow]"
+
+
 @click.command()
 @click.option(
     "--config",
@@ -53,7 +103,7 @@ def _load_calendar(url: str, base_dir: Path) -> list[Recipient]:
     default=None,
     help=(
         "Path to config file. Defaults to config.toml if it exists,"
-        " otherwise ~/.config/welcomer.toml."
+        " otherwise ~/.config/welcomer/config.toml."
     ),
 )
 @click.option(
@@ -67,6 +117,16 @@ def _load_calendar(url: str, base_dir: Path) -> list[Recipient]:
     is_flag=True,
     default=False,
     help=("Use the bundled test config and calendars instead of real ones. Requires --dry-run."),
+)
+@click.option(
+    "--yes",
+    is_flag=True,
+    default=False,
+    help=(
+        "Auto-send all eligible welcome emails without prompting."
+        " Skips already-sent reservations and records sends in ~/.config/welcomer/sent.log."
+        " Use --dry-run to preview what would be sent."
+    ),
 )
 @click.option(
     "--property",
@@ -84,7 +144,19 @@ def _load_calendar(url: str, base_dir: Path) -> list[Recipient]:
     "--days",
     type=int,
     default=None,
-    help="Only show reservations starting within this many days from today.",
+    help=(
+        "Only show reservations starting within this many days from today."
+        " Overrides the days setting in the config file."
+    ),
+)
+@click.option(
+    "--advance",
+    type=int,
+    default=None,
+    help=(
+        "Days before check-in when a reservation becomes eligible to send (default: 14)."
+        " Overrides the advance setting in the config file."
+    ),
 )
 @click.option(
     "--print-note",
@@ -97,15 +169,17 @@ def main(
     config: Path | None,
     dry_run: bool,
     test_config: bool,
+    yes: bool,
     property_filter: str | None,
     provider_filter: str | None,
     days: int | None,
+    advance: int | None,
     print_note: bool,
 ) -> None:
     """Send configurable welcome messages loaded from iCal calendar URLs.
 
     Reads configuration from a TOML file. Looks for config.toml in the current
-    directory first, then falls back to ~/.config/welcomer.toml.
+    directory first, then falls back to ~/.config/welcomer/config.toml.
     Copy config.example.toml to either location and edit to get started.
     """
     if test_config and not dry_run:
@@ -117,7 +191,10 @@ def main(
         data_pkg = importlib.resources.files("welcomer.data")
         toml_bytes = data_pkg.joinpath("test_config.toml").read_bytes()
         cfg = WelcomerConfig.from_dict(tomllib.loads(toml_bytes.decode()))
-        calendars = _apply_filters(cfg.calendars, property_filter, provider_filter)
+        calendars = sorted(
+            _apply_filters(cfg.calendars, property_filter, provider_filter),
+            key=lambda c: c.name,
+        )
         for cal in calendars:
             label = cal.name or cal.url
             found = _load_calendar(cal.url, Path.cwd())
@@ -152,7 +229,10 @@ def main(
             )
             raise SystemExit(0)
 
-        for cal in _apply_filters(cfg.calendars, property_filter, provider_filter):
+        for cal in sorted(
+            _apply_filters(cfg.calendars, property_filter, provider_filter),
+            key=lambda c: c.name,
+        ):
             label = cal.name or cal.url
             try:
                 found = _load_calendar(cal.url, config_path.parent)
@@ -167,21 +247,42 @@ def main(
             except Exception as e:
                 console.print(f"[red]Failed to load {label}:[/red] {e}")
 
-    if days is not None:
-        today = date.today()
-        cutoff = today + timedelta(days=days)
+    today = date.today()
+
+    effective_days = days if days is not None else cfg.days
+    if effective_days is not None:
+        cutoff = today + timedelta(days=effective_days)
         recipients = [rec for rec in recipients if rec.start and today <= rec.start <= cutoff]
+
+    effective_advance = advance if advance is not None else cfg.advance
+
+    overlaps = _detect_overlaps(recipients)
+    overlapping_recipients: set[int] = set()
+
+    for a, b in overlaps:
+        prop = a.extra.get("property", "")
+        a_prov = a.extra.get("provider", "")
+        b_prov = b.extra.get("provider", "")
+        overlapping_recipients.add(id(a))
+        overlapping_recipients.add(id(b))
+        console.print(
+            f"[bold red]⚠ Overlap at {prop}:[/bold red] "
+            f"[red]{a.name} ({a_prov}, {a.start}–{a.end})"
+            f" × {b.name} ({b_prov}, {b.start}–{b.end})[/red]"
+        )
 
     if not recipients:
         console.print("[yellow]No recipients found in any calendar.[/]")
         raise SystemExit(0)
+
+    sent_keys = _load_sent_log(SENT_LOG_PATH)
 
     results = build_welcomes(cfg, recipients, dry_run=dry_run)
 
     # Pre-compute plain-text column values for width alignment
     rows = []
     for r, rec in zip(results, recipients, strict=True):
-        phone = rec.phone or "unknown"
+        phone = rec.phone or "none"
         start = rec.start.strftime(cfg.date_format) if rec.start else ""
         end = rec.end.strftime(cfg.date_format) if rec.end else ""
         prop = rec.extra.get("property", "")
@@ -189,6 +290,7 @@ def main(
         duration = f"{(rec.end - rec.start).days} days" if rec.start and rec.end else ""
         prop_sep = " · " if prop and provider else ""
         prop_col = f"{prop}{prop_sep}{provider}"
+        eligible = rec.start is not None and rec.start <= today + timedelta(days=effective_advance)
         rows.append(
             (
                 r.recipient,
@@ -196,13 +298,15 @@ def main(
                 end,
                 duration,
                 prop_col,
-                r.email,
+                r.email or "none",
                 phone,
                 r,
                 prop,
                 provider,
                 rec.start,
                 rec.end,
+                rec,
+                eligible,
             )
         )
 
@@ -221,18 +325,37 @@ def main(
         f"{'📅 From':<{w_from - 1}}  "
         f"{'🏁 To':<{w_to - 1}}  "
         f"{'⏳ Duration':<{w_dur - 1}}  "
+        f"{'Sent':<4}  "
         f"{'🏡 Calendar':<{w_prop - 1}}  "
         f"{'📧 E-mail':<{w_email - 1}}  "
         f"📞 Phone"
         f"[/bold dim]"
     )
 
-    for name, start, end, duration, prop_col, email, phone, r, *_ in rows:
+    for (
+        name,
+        start,
+        end,
+        duration,
+        prop_col,
+        email,
+        phone,
+        r,
+        _prop,
+        _prov,
+        _start,
+        _end,
+        rec,
+        eligible,
+    ) in rows:
+        date_color = "red" if id(rec) in overlapping_recipients else "cyan"
+        already_sent = _sent_key(rec, _prop) in sent_keys
         console.print(
             f"[bold green]{name:<{w_name}}[/bold green]"
-            f"  [cyan]{start:<{w_from}}[/cyan]"
-            f"  [cyan]{end:<{w_to}}[/cyan]"
-            f"  [cyan]{duration:<{w_dur}}[/cyan]"
+            f"  [{date_color}]{start:<{w_from}}[/{date_color}]"
+            f"  [{date_color}]{end:<{w_to}}[/{date_color}]"
+            f"  [{date_color}]{duration:<{w_dur}}[/{date_color}]"
+            f"  {_sent_marker(email, already_sent, eligible)}"
             f"  {prop_col:<{w_prop}}"
             f"  [blue]{email:<{w_email}}[/blue]"
             f"  {phone}"
@@ -241,6 +364,74 @@ def main(
             console.print(f"  [yellow]{r.subject}[/yellow]")
             console.print(Markdown(r.body))
 
-    count_color = "yellow" if dry_run else "green"
-    verb = "Would send" if dry_run else "Sent"
-    console.print(f"[{count_color}]{verb} {len(results)} message(s).[/{count_color}]")
+    if test_config:
+        sent_count = sum(1 for r in results if r.email)
+        console.print(f"[yellow]Would send {sent_count} message(s).[/yellow]")
+    elif yes:
+        confirmed = 0
+        for (
+            _name,
+            _start_str,
+            _end_str,
+            _dur,
+            _pcol,
+            email,
+            _phone,
+            _r,
+            _prop,
+            _prov,
+            _start,
+            _end,
+            rec,
+            eligible,
+        ) in rows:
+            if email == "none":
+                continue
+            if not eligible:
+                continue
+            key = _sent_key(rec, _prop)
+            if key in sent_keys:
+                continue
+            if not dry_run:
+                _append_sent_log(SENT_LOG_PATH, key)
+                sent_keys.add(key)
+            confirmed += 1
+        color = "yellow" if dry_run else "green"
+        verb = "Would send" if dry_run else "Sent"
+        console.print(f"[{color}]{verb} {confirmed} message(s).[/{color}]")
+    else:
+        console.print()
+        confirmed = 0
+        for (
+            name,
+            start,
+            end,
+            _dur,
+            _pcol,
+            email,
+            _phone,
+            _r,
+            _prop,
+            _prov,
+            _start,
+            _end,
+            rec,
+            eligible,
+        ) in rows:
+            if email == "none":
+                continue
+            if not eligible:
+                continue
+            key = _sent_key(rec, _prop)
+            if key in sent_keys:
+                continue
+            date_str = f" ({start} → {end})" if start else ""
+            prop_str = f" at {_prop}" if _prop else ""
+            if click.confirm(f"Send to {name} ({email}){prop_str}{date_str}?", default=False):
+                if not dry_run:
+                    _append_sent_log(SENT_LOG_PATH, key)
+                    sent_keys.add(key)
+                confirmed += 1
+        color = "yellow" if dry_run else "green"
+        verb = "Would send" if dry_run else "Sent"
+        console.print(f"[{color}]{verb} {confirmed} message(s) interactively.[/{color}]")
