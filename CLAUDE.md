@@ -107,11 +107,11 @@ sent.log) | | `●` | green | Eligible to send now (check-in ≤ today + advance
 
 - `tests/fixtures/cal.ics` — real e-chalupy.cz reservation calendar (2 guests, used in ical tests)
 - `src/welcomer/data/cal.ics` — same file, packaged as resource (kept in sync with tests/fixtures)
-- `tests/fixtures/tipsy_gnome_napHub.ics`, `biscuit_chateau_snoozePal.ics`,
-  `snoring_goat_snoozePal.ics` — 3 test calendars (The Tipsy Gnome/NapHub, Château du
-  Biscuit/SnoozePal, The Snoring Goat/SnoozePal; 2 guests each, 2026 dates). Referenced directly by
-  `--test-config` at runtime.
-- `src/welcomer/data/test_config.toml` — bundled test config referencing the 3 property ICS files
+- `src/welcomer/data/testdata.py` — programmatic test data for `--test-config`; dates are always
+  relative to `date.today()` so they never go stale. Four properties (Biscuit Château/SnoozePal,
+  Biscuit Château/NapHub, The Snoring Goat/SnoozePal, The Tipsy Gnome/NapHub) with 8 events total.
+  Biscuit Château always has an overlap between SnoozePal and NapHub. Radka Horáčková is pre-seeded
+  as already sent. Exposes `get_test_calendars()`, `get_pre_sent_key()`, and `TEST_CONFIG`.
 
 When updating any fixture, copy to both `tests/fixtures/` and `src/welcomer/data/`.
 

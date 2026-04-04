@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.resources
-import tomllib
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -184,25 +182,37 @@ def main(
     if test_config and not dry_run:
         raise click.UsageError("--test-config requires --dry-run")
 
+    sent_keys = _load_sent_log(SENT_LOG_PATH)
+    if test_config:
+        console.print("[dim]Sent log: test mode, 1 entry pre-seeded[/dim]")
+    elif SENT_LOG_PATH.exists():
+        console.print(f"[dim]Sent log: {SENT_LOG_PATH} ({len(sent_keys)} entries)[/dim]")
+    else:
+        console.print(f"[dim]Sent log will be created at: {SENT_LOG_PATH}[/dim]")
+
     recipients = []
 
     if test_config:
-        data_pkg = importlib.resources.files("welcomer.data")
-        toml_bytes = data_pkg.joinpath("test_config.toml").read_bytes()
-        cfg = WelcomerConfig.from_dict(tomllib.loads(toml_bytes.decode()))
-        calendars = sorted(
-            _apply_filters(cfg.calendars, property_filter, provider_filter),
-            key=lambda c: c.name,
-        )
-        for cal in calendars:
-            label = cal.name or cal.url
-            found = _load_calendar(cal.url, Path.cwd())
-            for r in found:
+        from .data.testdata import TEST_CONFIG, get_pre_sent_key, get_test_calendars
+
+        cfg = TEST_CONFIG
+        sent_keys.add(get_pre_sent_key())
+        all_calendars = get_test_calendars()
+        filtered = [
+            (cal, recs)
+            for cal, recs in all_calendars
+            if (not property_filter or property_filter.lower() in cal.name.lower())
+            and (not provider_filter or provider_filter.lower() in cal.provider.lower())
+        ]
+        for cal, recs in sorted(filtered, key=lambda x: x[0].name):
+            for r in recs:
                 r.extra["property"] = cal.name
                 r.extra["provider"] = cal.provider
             provider_str = f" · {cal.provider}" if cal.provider else ""
-            console.print(f"[dim]Loaded {len(found)} recipient(s) from {label}{provider_str}[/dim]")
-            recipients.extend(found)
+            console.print(
+                f"[dim]Loaded {len(recs)} recipient(s) from {cal.name}{provider_str}[/dim]"
+            )
+            recipients.extend(recs)
     else:
         config_path = config or find_default_config()
 
@@ -266,8 +276,6 @@ def main(
     if not recipients:
         console.print("[yellow]No recipients found in any calendar.[/]")
         raise SystemExit(0)
-
-    sent_keys = _load_sent_log(SENT_LOG_PATH)
 
     results = build_welcomes(cfg, recipients, dry_run=dry_run)
 

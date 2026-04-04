@@ -225,18 +225,17 @@ def _mock_today(d: date):
 
 
 def test_days_filter_excludes_far_future():
+    # All test data starts at today+30 minimum — --days 1 shows nothing
     runner = CliRunner()
-    with patch("welcomer.cli.date", _mock_today(date(2026, 4, 3))):
-        result = runner.invoke(main, ["--dry-run", "--test-config", "--days", "1"])
+    result = runner.invoke(main, ["--dry-run", "--test-config", "--days", "1"])
     assert result.exit_code == 0
     assert "No recipients found" in result.output
 
 
 def test_days_filter_includes_upcoming():
-    # Within 50 days from 2026-04-03 (cutoff 2026-05-23): Radka (May 22) yes, Anna (Jun 1) no
+    # Radka starts today+50, Anna today+60 — --days 55 includes Radka, not Anna
     runner = CliRunner()
-    with patch("welcomer.cli.date", _mock_today(date(2026, 4, 3))):
-        result = runner.invoke(main, ["--dry-run", "--test-config", "--days", "50"])
+    result = runner.invoke(main, ["--dry-run", "--test-config", "--days", "55"])
     assert result.exit_code == 0
     assert "Radka" in result.output
     assert "Anna" not in result.output
@@ -256,8 +255,7 @@ def test_days_filter_not_active_by_default():
 
 
 def test_sort_full_order_by_start_date():
-    # SnoozePal guests only (NapHub exports no contact info):
-    # Radka (May 22) → Anna (Jun 1) → Pavel (Aug 20) → Jiří (Sep 5)
+    # SnoozePal guests by start offset: Radka (+50) < Anna (+60) < Pavel (+100) < Jiří (+150)
     runner = CliRunner()
     result = runner.invoke(main, ["--dry-run", "--test-config"])
     # Search only within the table (overlap warnings may reference names before the table)
@@ -305,37 +303,38 @@ def test_sort_by_provider_when_same_dates_and_property(tmp_path):
 
 
 def test_days_filter_boundary_inclusive():
-    # Radka starts 2026-05-22, which is exactly 49 days from 2026-04-03 → must be included
+    # Radka starts today+50 — --days 50 must include her (boundary inclusive)
     runner = CliRunner()
-    with patch("welcomer.cli.date", _mock_today(date(2026, 4, 3))):
-        result = runner.invoke(main, ["--dry-run", "--test-config", "--days", "49"])
+    result = runner.invoke(main, ["--dry-run", "--test-config", "--days", "50"])
     assert "Radka" in result.output
 
 
-def test_days_filter_excludes_past():
-    # Mock today = 2026-06-15: Radka (May 22) and Anna (Jun 1) are past; Pavel/Jiří are future
-    runner = CliRunner()
-    with patch("welcomer.cli.date", _mock_today(date(2026, 6, 15))):
-        result = runner.invoke(main, ["--dry-run", "--test-config", "--days", "365"])
-    assert "Pavel" in result.output
-    assert "Jiří" in result.output
-    assert "Radka" not in result.output
-    assert "Anna" not in result.output
+def test_days_filter_excludes_past(tmp_path):
+    # Explicitly test that past start dates are filtered out
+    today = date.today()
+    recs = [
+        Recipient(name="PastGuest", email="p@x.com", start=today - timedelta(days=5), end=today),
+        Recipient(
+            name="FutureGuest",
+            email="f@x.com",
+            start=today + timedelta(days=10),
+            end=today + timedelta(days=15),
+        ),
+    ]
+    result = _run_with_calendars(tmp_path, [("Cal", "P", recs)], extra_args=["--days", "30"])
+    assert "FutureGuest" in result.output
+    assert "PastGuest" not in result.output
 
 
 def test_days_filter_combined_with_property():
-    # days=100 from 2026-04-03 → cutoff 2026-07-12
-    # --property Snoring → only The Snoring Goat (Radka May 22, Jiří Sep 5)
-    # Radka is within 100 days, Jiří is not
+    # --property Snoring: Radka (today+50) within 100 days, Jiří (today+150) not
     runner = CliRunner()
-    with patch("welcomer.cli.date", _mock_today(date(2026, 4, 3))):
-        result = runner.invoke(
-            main, ["--dry-run", "--test-config", "--days", "100", "--property", "Snoring"]
-        )
+    result = runner.invoke(
+        main, ["--dry-run", "--test-config", "--days", "100", "--property", "Snoring"]
+    )
     assert result.exit_code == 0
     assert "Radka" in result.output
     assert "Jiří" not in result.output
-    assert "Martina" not in result.output
 
 
 def test_days_zero_shows_only_today(tmp_path):
@@ -583,6 +582,42 @@ def test_sent_column_checkmark_when_logged(config_file, mock_sent_log):
     runner = CliRunner()
     with patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS):
         result = runner.invoke(main, ["--config", str(config_file), "--dry-run", "--yes"])
+    assert result.exit_code == 0
+    assert "✓" in result.output
+
+
+def test_sent_log_loaded_message(config_file, mock_sent_log):
+    """Startup line shows path and entry count when sent.log exists."""
+    mock_sent_log.write_text("somekey\n", encoding="utf-8")
+    runner = CliRunner()
+    with patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS):
+        result = runner.invoke(main, ["--config", str(config_file), "--dry-run", "--yes"])
+    assert result.exit_code == 0
+    assert "Sent log:" in result.output
+    assert "1 entries" in result.output
+
+
+def test_sent_log_will_be_created_message(config_file, mock_sent_log):
+    """Startup line says 'will be created' when sent.log does not yet exist."""
+    runner = CliRunner()
+    with patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS):
+        result = runner.invoke(main, ["--config", str(config_file), "--dry-run", "--yes"])
+    assert result.exit_code == 0
+    assert "Sent log will be created" in result.output
+
+
+def test_test_config_sent_log_message():
+    """--test-config shows a test-mode sent.log startup line."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["--dry-run", "--test-config"])
+    assert result.exit_code == 0
+    assert "pre-seeded" in result.output
+
+
+def test_test_config_pre_sent_shows_checkmark():
+    """In --test-config mode the pre-seeded entry (Radka) shows ✓ in the table."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["--dry-run", "--test-config"])
     assert result.exit_code == 0
     assert "✓" in result.output
 
