@@ -8,6 +8,7 @@ from pathlib import Path
 import click
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.markup import escape
 
 from .config import (
     LOCAL_CONFIG_PATH,
@@ -357,8 +358,8 @@ def main(
             f"  [{date_color}]{duration:<{w_dur}}[/{date_color}]"
             f"  {_sent_marker(email, already_sent, eligible)}"
             f"  {prop_col:<{w_prop}}"
-            f"  [blue]{email:<{w_email}}[/blue]"
-            f"  {phone}"
+            f"  [bold blue]{escape(email):<{w_email}}[/bold blue]"
+            f"  [bold green]{escape(phone)}[/bold green]"
         )
         if print_note:
             console.print(f"  [yellow]{r.subject}[/yellow]")
