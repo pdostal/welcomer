@@ -9,6 +9,8 @@ from datetime import date, datetime
 import httpx
 from icalendar import Calendar, Event
 
+from .cache import get_cached, save_cache
+
 
 @dataclass
 class Recipient:
@@ -17,6 +19,8 @@ class Recipient:
     start: date | None = None
     end: date | None = None
     phone: str = ""
+    adults: int | None = None
+    kids: int | None = None
     extra: dict = field(default_factory=dict)
 
 
@@ -44,14 +48,26 @@ def _extract_cn(prop) -> str:
 
 def _email_from_description(description: str) -> str:
     """Extract email address from a Description field containing 'Email: ...'."""
-    m = re.search(r"Email:\s*([^\s\\,;\n]+)", description, re.IGNORECASE)
+    m = re.search(r"Email:[ \t]*([^\s\\,;\n]+)", description, re.IGNORECASE)
     return m.group(1) if m else ""
 
 
 def _phone_from_description(description: str) -> str:
     """Extract phone number from a Description field containing 'Telefon: ...'."""
-    m = re.search(r"Telefon:\s*([^\s\\,;\n]+)", description, re.IGNORECASE)
+    m = re.search(r"Telefon:[ \t]*([^\s\\,;\n]+)", description, re.IGNORECASE)
     return m.group(1) if m else ""
+
+
+def _adults_from_description(description: str) -> int | None:
+    """Extract adult guest count from 'Dospělí: N' in a Description field."""
+    m = re.search(r"Dosp[eě]l[ií]:[ \t]*(\d+)", description, re.IGNORECASE)
+    return int(m.group(1)) if m else None
+
+
+def _kids_from_description(description: str) -> int | None:
+    """Extract child guest count from 'děti N' in a Description field."""
+    m = re.search(r"d[eě]ti[ \t]+(\d+)", description, re.IGNORECASE)
+    return int(m.group(1)) if m else None
 
 
 def recipients_from_ical(data: bytes) -> list[Recipient]:
@@ -70,6 +86,8 @@ def recipients_from_ical(data: bytes) -> list[Recipient]:
 
         description = str(event.get("DESCRIPTION", ""))
         phone = _phone_from_description(description)
+        adults = _adults_from_description(description)
+        kids = _kids_from_description(description)
 
         attendees = event.get("ATTENDEE")
         if attendees is None:
@@ -87,6 +105,8 @@ def recipients_from_ical(data: bytes) -> list[Recipient]:
                     start=start,
                     end=end,
                     phone=phone,
+                    adults=adults,
+                    kids=kids,
                     extra={"summary": summary},
                 )
             )
@@ -104,6 +124,8 @@ def recipients_from_ical(data: bytes) -> list[Recipient]:
                         start=start,
                         end=end,
                         phone=phone,
+                        adults=adults,
+                        kids=kids,
                         extra={"summary": summary},
                     )
                 )
@@ -118,6 +140,8 @@ def recipients_from_ical(data: bytes) -> list[Recipient]:
                             start=start,
                             end=end,
                             phone=phone,
+                            adults=adults,
+                            kids=kids,
                             extra={"summary": summary},
                         )
                     )
@@ -125,8 +149,19 @@ def recipients_from_ical(data: bytes) -> list[Recipient]:
     return results
 
 
-def fetch_recipients(url: str) -> list[Recipient]:
-    """Fetch an iCal URL and return extracted recipients."""
+def fetch_recipients(url: str, force_refresh: bool = False) -> list[Recipient]:
+    """Fetch an iCal URL and return extracted recipients.
+
+    Results are cached on disk for 5 hours (``~/.config/welcomer/cache/``).
+    Pass ``force_refresh=True`` to bypass the cache and always fetch from the
+    network, overwriting the existing cached entry.
+    """
+    if not force_refresh:
+        cached = get_cached(url)
+        if cached is not None:
+            return recipients_from_ical(cached)
+
     response = httpx.get(url, follow_redirects=True, timeout=15)
     response.raise_for_status()
+    save_cache(url, response.content)
     return recipients_from_ical(response.content)

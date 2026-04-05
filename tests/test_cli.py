@@ -32,7 +32,10 @@ def _run_with_calendars(tmp_path, calendars, extra_args=()):
     p.write_text("\n".join(lines))
 
     runner = CliRunner()
-    with patch("welcomer.cli.fetch_recipients", side_effect=lambda u: url_map.get(u, [])):
+    with patch(
+        "welcomer.cli.fetch_recipients",
+        side_effect=lambda u, force_refresh=False: url_map.get(u, []),
+    ):
         result = runner.invoke(main, ["--config", str(p), "--dry-run", "--yes", *extra_args])
     return result
 
@@ -225,11 +228,15 @@ def _mock_today(d: date):
 
 
 def test_days_filter_excludes_far_future():
-    # All test data starts at today+30 minimum — --days 1 shows nothing
+    # Klára is in-progress (start-3, end+4) so --days 1 still shows her; future guests excluded
     runner = CliRunner()
     result = runner.invoke(main, ["--dry-run", "--test-config", "--days", "1"])
     assert result.exit_code == 0
-    assert "No recipients found" in result.output
+    # Check only the table (overlap warnings may mention other guests)
+    table = result.output[result.output.index("👤 Name") :]
+    assert "Klára" in table
+    assert "Anna" not in table
+    assert "Radka" not in table
 
 
 def test_days_filter_includes_upcoming():
@@ -237,16 +244,20 @@ def test_days_filter_includes_upcoming():
     runner = CliRunner()
     result = runner.invoke(main, ["--dry-run", "--test-config", "--days", "55"])
     assert result.exit_code == 0
-    assert "Radka" in result.output
-    assert "Anna" not in result.output
+    # Overlap warning may mention Anna even when she's filtered from the table —
+    # check only the table rows (after the header line).
+    table = result.output[result.output.index("👤 Name") :]
+    assert "Radka" in table
+    assert "Anna" not in table
 
 
 def test_days_filter_not_active_by_default():
-    # Only SnoozePal calendars expose guest contact info (4 guests: Anna, Pavel, Radka, Jiří)
+    # SnoozePal guests: Klára, Tomáš (Multi), Anna, Pavel, Radka, Jiří = 6 total.
+    # Tomáš appears at two properties but merges into one Multi entry.
     runner = CliRunner()
     result = runner.invoke(main, ["--dry-run", "--test-config"])
     assert result.exit_code == 0
-    assert "Would send 4" in result.output
+    assert "Would send 6" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -255,12 +266,19 @@ def test_days_filter_not_active_by_default():
 
 
 def test_sort_full_order_by_start_date():
-    # SnoozePal guests by start offset: Radka (+50) < Anna (+60) < Pavel (+100) < Jiří (+150)
+    # Sort: Klára (-3) < Tomáš (+10, Multi) < Radka (+50) < Anna (+60) < Pavel (+100) < Jiří (+150)
     runner = CliRunner()
     result = runner.invoke(main, ["--dry-run", "--test-config"])
     # Search only within the table (overlap warnings may reference names before the table)
     table = result.output[result.output.index("👤 Name") :]
-    assert table.index("Radka") < table.index("Anna") < table.index("Pavel") < table.index("Jiří")
+    assert (
+        table.index("Klára")
+        < table.index("Tomáš")
+        < table.index("Radka")
+        < table.index("Anna")
+        < table.index("Pavel")
+        < table.index("Jiří")
+    )
 
 
 def test_sort_by_end_date_when_same_start(tmp_path):
@@ -310,10 +328,15 @@ def test_days_filter_boundary_inclusive():
 
 
 def test_days_filter_excludes_past(tmp_path):
-    # Explicitly test that past start dates are filtered out
+    # Reservations that have fully ended (end < today) are excluded
     today = date.today()
     recs = [
-        Recipient(name="PastGuest", email="p@x.com", start=today - timedelta(days=5), end=today),
+        Recipient(
+            name="PastGuest",
+            email="p@x.com",
+            start=today - timedelta(days=5),
+            end=today - timedelta(days=1),
+        ),
         Recipient(
             name="FutureGuest",
             email="f@x.com",
@@ -324,6 +347,250 @@ def test_days_filter_excludes_past(tmp_path):
     result = _run_with_calendars(tmp_path, [("Cal", "P", recs)], extra_args=["--days", "30"])
     assert "FutureGuest" in result.output
     assert "PastGuest" not in result.output
+
+
+def test_days_filter_includes_in_progress(tmp_path):
+    # A reservation that started in the past but hasn't ended yet must be shown
+    today = date.today()
+    recs = [
+        Recipient(
+            name="InProgressGuest",
+            email="ip@x.com",
+            start=today - timedelta(days=3),
+            end=today + timedelta(days=4),
+        ),
+        Recipient(
+            name="FutureGuest",
+            email="f@x.com",
+            start=today + timedelta(days=10),
+            end=today + timedelta(days=15),
+        ),
+    ]
+    result = _run_with_calendars(tmp_path, [("Cal", "P", recs)], extra_args=["--days", "30"])
+    assert "InProgressGuest" in result.output
+    assert "FutureGuest" in result.output
+
+
+def test_days_filter_includes_checkout_today(tmp_path):
+    # A reservation that checks out today (end == today) must be shown
+    today = date.today()
+    recs = [
+        Recipient(
+            name="CheckoutToday",
+            email="c@x.com",
+            start=today - timedelta(days=5),
+            end=today,
+        ),
+        Recipient(
+            name="AlreadyGone",
+            email="g@x.com",
+            start=today - timedelta(days=20),
+            end=today - timedelta(days=12),
+        ),
+    ]
+    result = _run_with_calendars(tmp_path, [("Cal", "P", recs)], extra_args=["--days", "30"])
+    # Check only the table (overlap warnings could mention names even for filtered-out entries)
+    table = result.output[result.output.index("👤 Name") :]
+    assert "CheckoutToday" in table
+    assert "AlreadyGone" not in table
+
+
+# ---------------------------------------------------------------------------
+# Multi-property merging
+# ---------------------------------------------------------------------------
+
+
+def test_multi_property_merges_to_multi_label(tmp_path):
+    """Same guest, same provider, same dates, different properties → shows 'Multi'."""
+    today = date.today()
+    rec1 = Recipient(
+        name="Same Guest",
+        email="sg@x.com",
+        phone="+1234",
+        start=today + timedelta(days=10),
+        end=today + timedelta(days=14),
+    )
+    rec2 = Recipient(
+        name="Same Guest",
+        email="sg@x.com",
+        phone="+1234",
+        start=today + timedelta(days=10),
+        end=today + timedelta(days=14),
+    )
+    result = _run_with_calendars(
+        tmp_path,
+        [("Villa Alpha", "SameProvider", [rec1]), ("Villa Beta", "SameProvider", [rec2])],
+    )
+    table = result.output[result.output.index("👤 Name") :]
+    assert "Multi" in table
+    assert "Villa Alpha" not in table
+    assert "Villa Beta" not in table
+    assert result.output.count("Same Guest") == 1  # only one row
+
+
+def test_multi_property_sends_one_email(tmp_path):
+    """Merged Multi entry counts as a single email to send."""
+    today = date.today()
+    start, end = today + timedelta(days=5), today + timedelta(days=10)
+    rec_a = Recipient(name="Same Guest", email="sg@x.com", start=start, end=end)
+    rec_b = Recipient(name="Same Guest", email="sg@x.com", start=start, end=end)
+    result = _run_with_calendars(
+        tmp_path,
+        [("PropA", "P", [rec_a]), ("PropB", "P", [rec_b])],
+        extra_args=["--advance", "99999"],
+    )
+    assert "Would send 1" in result.output
+
+
+def test_multi_property_different_provider_not_merged(tmp_path):
+    """Same name and dates but different providers → two separate entries, not merged."""
+    today = date.today()
+    start, end = today + timedelta(days=10), today + timedelta(days=14)
+    rec_a = Recipient(name="Same Guest", email="sg@x.com", start=start, end=end)
+    rec_b = Recipient(name="Same Guest", email="sg@x.com", start=start, end=end)
+    result = _run_with_calendars(
+        tmp_path,
+        [("PropA", "ProviderX", [rec_a]), ("PropB", "ProviderY", [rec_b])],
+    )
+    table = result.output[result.output.index("👤 Name") :]
+    assert "Multi" not in table
+    assert table.count("Same Guest") == 2
+
+
+def test_multi_property_different_name_not_merged(tmp_path):
+    """Same provider and dates but different names → two entries, not merged."""
+    today = date.today()
+    start, end = today + timedelta(days=10), today + timedelta(days=14)
+    rec_a = Recipient(name="Alice Smith", email="a@x.com", start=start, end=end)
+    rec_b = Recipient(name="Bob Jones", email="b@x.com", start=start, end=end)
+    result = _run_with_calendars(
+        tmp_path,
+        [("PropA", "P", [rec_a]), ("PropB", "P", [rec_b])],
+    )
+    table = result.output[result.output.index("👤 Name") :]
+    assert "Multi" not in table
+    assert "Alice Smith" in table
+    assert "Bob Jones" in table
+
+
+def test_multi_property_different_dates_not_merged(tmp_path):
+    """Same name and provider but different check-in/out dates → not merged."""
+    today = date.today()
+    rec1 = Recipient(
+        name="Same Guest",
+        email="sg@x.com",
+        start=today + timedelta(days=10),
+        end=today + timedelta(days=14),
+    )
+    rec2 = Recipient(
+        name="Same Guest",
+        email="sg@x.com",
+        start=today + timedelta(days=11),
+        end=today + timedelta(days=14),
+    )
+    result = _run_with_calendars(
+        tmp_path,
+        [("PropA", "P", [rec1]), ("PropB", "P", [rec2])],
+    )
+    table = result.output[result.output.index("👤 Name") :]
+    assert "Multi" not in table
+    assert table.count("Same Guest") == 2
+
+
+def test_multi_property_three_properties_merged(tmp_path):
+    """Three properties, same provider, same guest, same dates → one Multi entry."""
+    today = date.today()
+    start, end = today + timedelta(days=10), today + timedelta(days=14)
+    recs = [
+        Recipient(name="Triple Guest", email="triple@x.com", start=start, end=end) for _ in range(3)
+    ]
+    result = _run_with_calendars(
+        tmp_path,
+        [
+            ("P1", "SameProv", [recs[0]]),
+            ("P2", "SameProv", [recs[1]]),
+            ("P3", "SameProv", [recs[2]]),
+        ],
+        extra_args=["--advance", "99999"],
+    )
+    assert result.output.count("Triple Guest") == 1
+    assert "Would send 1" in result.output
+
+
+def test_multi_property_test_config_shows_tomas():
+    """Tomáš appears in two SnoozePal calendars and is shown as a single Multi entry."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["--dry-run", "--test-config"])
+    assert result.exit_code == 0
+    table = result.output[result.output.index("👤 Name") :]
+    assert "Tomáš" in table
+    assert "Multi" in table
+    # Tomáš appears exactly once in the table
+    assert table.count("Tomáš") == 1
+
+
+def test_multi_property_same_property_not_merged(tmp_path):
+    """Two entries for the same property and same guest are not merged (overlap case, not Multi)."""
+    today = date.today()
+    rec = Recipient(
+        name="Guest",
+        email="g@x.com",
+        start=today + timedelta(days=10),
+        end=today + timedelta(days=14),
+    )
+    result = _run_with_calendars(
+        tmp_path,
+        [("Same Property", "P", [rec, rec])],
+    )
+    table = result.output[result.output.index("👤 Name") :]
+    assert "Multi" not in table
+
+
+# ---------------------------------------------------------------------------
+# Active-today name colour (_name_color unit tests)
+# ---------------------------------------------------------------------------
+
+
+def test_name_color_active_ongoing():
+    from welcomer.cli import _name_color
+
+    today = date(2026, 6, 5)
+    assert _name_color(today - timedelta(2), today + timedelta(3), today) == "blue"
+
+
+def test_name_color_checkin_today():
+    from welcomer.cli import _name_color
+
+    today = date(2026, 6, 5)
+    assert _name_color(today, today + timedelta(5), today) == "blue"
+
+
+def test_name_color_checkout_today():
+    from welcomer.cli import _name_color
+
+    today = date(2026, 6, 5)
+    assert _name_color(today - timedelta(5), today, today) == "blue"
+
+
+def test_name_color_future_is_green():
+    from welcomer.cli import _name_color
+
+    today = date(2026, 6, 5)
+    assert _name_color(today + timedelta(2), today + timedelta(7), today) == "green"
+
+
+def test_name_color_past_is_green():
+    from welcomer.cli import _name_color
+
+    today = date(2026, 6, 5)
+    assert _name_color(today - timedelta(7), today - timedelta(2), today) == "green"
+
+
+def test_name_color_none_dates_is_green():
+    from welcomer.cli import _name_color
+
+    today = date(2026, 6, 5)
+    assert _name_color(None, None, today) == "green"
 
 
 def test_days_filter_combined_with_property():
@@ -345,8 +612,11 @@ def test_days_zero_shows_only_today(tmp_path):
     ]
     with patch("welcomer.cli.date", _mock_today(today)):
         result = _run_with_calendars(tmp_path, [("Cal", "Prov", recs)], extra_args=["--days", "0"])
-    assert "Today" in result.output
-    assert "Tomorrow" not in result.output
+    # Overlap warning may mention Tomorrow even though it's outside --days 0 —
+    # check only the table rows (after the header line).
+    table = result.output[result.output.index("👤 Name") :]
+    assert "Today" in table
+    assert "Tomorrow" not in table
 
 
 def test_fetch_failure(config_file):
@@ -391,7 +661,7 @@ def test_multiple_calendars_partial_failure(tmp_path):
         )
     ]
 
-    def side_effect(url):
+    def side_effect(url, force_refresh=False):
         if "good" in url:
             return good_recipients
         raise Exception("unreachable")
@@ -443,7 +713,7 @@ def test_closed_events_shown_but_not_sent():
     result = runner.invoke(main, ["--dry-run", "--test-config"])
     assert result.exit_code == 0
     assert "CLOSED" in result.output
-    assert "Would send 4" in result.output
+    assert "Would send 6" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -521,6 +791,141 @@ def test_overlap_only_touching_not_overlapping(tmp_path):
         [("Villa", "P1", [recs[0]]), ("Villa", "P2", [recs[1]])],
     )
     assert "Overlap" not in result.output
+
+
+def test_overlap_multi_vs_single_different_provider(tmp_path):
+    """Multi-property reservation overlaps a single-property booking from a different provider."""
+    start = date(2026, 6, 1)
+    end = date(2026, 6, 10)
+    overlap_start = date(2026, 6, 5)
+    overlap_end = date(2026, 6, 15)
+    # Tomáš books PropA + PropB through Provider1 → merged to Multi
+    tomas_a = Recipient(name="Tomáš", email="t@x.com", start=start, end=end)
+    tomas_b = Recipient(name="Tomáš", email="t@x.com", start=start, end=end)
+    # Conflicting booking from Provider2 for PropA only
+    conflicting = Recipient(
+        name="Conflicting", email="c@x.com", start=overlap_start, end=overlap_end
+    )
+    result = _run_with_calendars(
+        tmp_path,
+        [
+            ("PropA", "Provider1", [tomas_a]),
+            ("PropB", "Provider1", [tomas_b]),
+            ("PropA", "Provider2", [conflicting]),
+        ],
+    )
+    assert "Overlap" in result.output
+    assert "Tomáš" in result.output
+    assert "Conflicting" in result.output
+
+
+def test_overlap_both_scenarios_simultaneously(tmp_path):
+    """Both overlap scenarios at once:
+
+    1. Multi (PropA+PropB / P1) vs single (PropA / P2) — Multi vs single
+    2. Single (PropA / P2) vs single (PropA / P3) — single vs single
+
+    Both must be detected.
+    """
+    start = date(2026, 6, 1)
+    end = date(2026, 6, 10)
+    # Tomáš: Multi (PropA + PropB / P1)
+    tomas_a = Recipient(name="Tomáš", email="t@x.com", start=start, end=end)
+    tomas_b = Recipient(name="Tomáš", email="t@x.com", start=start, end=end)
+    # Bob: PropA / P2, overlaps Tomáš (PropA component)
+    bob = Recipient(name="Bob", email="b@x.com", start=date(2026, 6, 5), end=date(2026, 6, 15))
+    # Carol: PropA / P3, overlaps both Tomáš and Bob
+    carol = Recipient(name="Carol", email="c@x.com", start=date(2026, 6, 3), end=date(2026, 6, 12))
+    result = _run_with_calendars(
+        tmp_path,
+        [
+            ("PropA", "P1", [tomas_a]),
+            ("PropB", "P1", [tomas_b]),
+            ("PropA", "P2", [bob]),
+            ("PropA", "P3", [carol]),
+        ],
+    )
+    assert "Overlap" in result.output
+    # Tomáš (Multi) overlaps with Bob and Carol (single vs Multi)
+    assert result.output.count("Tomáš") >= 1
+    # Bob and Carol overlap with each other (single vs single at same property)
+    assert "Bob" in result.output
+    assert "Carol" in result.output
+    # At least 3 overlap pairs: Tomáš×Bob, Tomáš×Carol, Bob×Carol
+    assert result.output.count("Overlap") >= 3
+
+
+def test_no_overlap_multi_non_overlapping_dates(tmp_path):
+    """Multi reservation and a single-property booking on non-overlapping dates → no warning."""
+    # Tomáš: PropA + PropB / P1, June 1–10
+    s, e = date(2026, 6, 1), date(2026, 6, 10)
+    tomas_a = Recipient(name="Tomáš", email="t@x.com", start=s, end=e)
+    tomas_b = Recipient(name="Tomáš", email="t@x.com", start=s, end=e)
+    # Bob: PropA / P2, June 15–20 (after Tomáš)
+    bob = Recipient(name="Bob", email="b@x.com", start=date(2026, 6, 15), end=date(2026, 6, 20))
+    result = _run_with_calendars(
+        tmp_path,
+        [
+            ("PropA", "P1", [tomas_a]),
+            ("PropB", "P1", [tomas_b]),
+            ("PropA", "P2", [bob]),
+        ],
+    )
+    assert "Overlap" not in result.output
+
+
+def test_overlap_warning_shows_multi_for_multi_single_for_single(tmp_path):
+    """Multi entry shows 'Multi · provider' in warning; single-property entry shows its property."""
+    start = date(2026, 6, 1)
+    end = date(2026, 6, 10)
+    # Tomáš: Multi (PropA + PropB / P1)
+    tomas_a = Recipient(name="Tomáš", email="t@x.com", start=start, end=end)
+    tomas_b = Recipient(name="Tomáš", email="t@x.com", start=start, end=end)
+    # Conflicting: PropA / P2, overlapping dates
+    conflicting = Recipient(
+        name="Conflict", email="c@x.com", start=date(2026, 6, 5), end=date(2026, 6, 15)
+    )
+    result = _run_with_calendars(
+        tmp_path,
+        [
+            ("PropA", "P1", [tomas_a]),
+            ("PropB", "P1", [tomas_b]),
+            ("PropA", "P2", [conflicting]),
+        ],
+    )
+    warnings = [line for line in result.output.splitlines() if "Overlap" in line]
+    assert warnings, "expected at least one overlap warning"
+    # Tomáš (Multi) shows as "Multi · P1"; Conflict (single) shows as "PropA · P2"
+    assert any("Multi" in w for w in warnings)
+    assert any("PropA" in w for w in warnings)
+
+
+def test_overlap_warning_both_multi_shows_multi_labels(tmp_path):
+    """When both overlapping entries are Multi, both sides show 'Multi · provider'."""
+    start = date(2026, 6, 1)
+    end = date(2026, 6, 10)
+    overlap_start = date(2026, 6, 5)
+    overlap_end = date(2026, 6, 15)
+    # Alice: Multi (PropA + PropB / P1)
+    alice_a = Recipient(name="Alice", email="a@x.com", start=start, end=end)
+    alice_b = Recipient(name="Alice", email="a@x.com", start=start, end=end)
+    # Bob: Multi (PropA + PropC / P2), overlaps Alice at PropA
+    bob_a = Recipient(name="Bob", email="b@x.com", start=overlap_start, end=overlap_end)
+    bob_c = Recipient(name="Bob", email="b@x.com", start=overlap_start, end=overlap_end)
+    result = _run_with_calendars(
+        tmp_path,
+        [
+            ("PropA", "P1", [alice_a]),
+            ("PropB", "P1", [alice_b]),
+            ("PropA", "P2", [bob_a]),
+            ("PropC", "P2", [bob_c]),
+        ],
+    )
+    warnings = [line for line in result.output.splitlines() if "Overlap" in line]
+    assert warnings, "expected at least one overlap warning"
+    # Both are Multi — warning shows "Multi · P1" and "Multi · P2"
+    assert any("Multi · P1" in w for w in warnings)
+    assert any("Multi · P2" in w for w in warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -654,11 +1059,14 @@ def _eligible_recs():
     ]
 
 
-def test_interactive_confirm_writes_sent_log(config_file, mock_sent_log):
+def test_interactive_confirm_writes_sent_log(smtp_config_file, mock_sent_log):
     runner = CliRunner()
-    with patch("welcomer.cli.fetch_recipients", return_value=_eligible_recs()):
+    with (
+        patch("welcomer.cli.fetch_recipients", return_value=_eligible_recs()),
+        patch("welcomer.cli.send_email"),
+    ):
         # "y\nn\n" → confirm Alice, skip Bob
-        result = runner.invoke(main, ["--config", str(config_file)], input="y\nn\n")
+        result = runner.invoke(main, ["--config", str(smtp_config_file)], input="y\nn\n")
     assert result.exit_code == 0
     assert mock_sent_log.exists()
     logged = mock_sent_log.read_text(encoding="utf-8")
@@ -711,22 +1119,28 @@ def test_interactive_summary_line(config_file, mock_sent_log):
 # ---------------------------------------------------------------------------
 
 
-def test_interactive_is_default(config_file, mock_sent_log):
+def test_interactive_is_default(smtp_config_file, mock_sent_log):
     """Without any flag the app prompts for eligible recipients."""
     runner = CliRunner()
-    with patch("welcomer.cli.fetch_recipients", return_value=_eligible_recs()):
-        result = runner.invoke(main, ["--config", str(config_file)], input="y\ny\n")
+    with (
+        patch("welcomer.cli.fetch_recipients", return_value=_eligible_recs()),
+        patch("welcomer.cli.send_email"),
+    ):
+        result = runner.invoke(main, ["--config", str(smtp_config_file)], input="y\ny\n")
     assert result.exit_code == 0
     assert "interactively" in result.output
     # Both confirmed → written to log
     assert mock_sent_log.exists()
 
 
-def test_yes_flag_sends_without_prompts(config_file, mock_sent_log):
+def test_yes_flag_sends_without_prompts(smtp_config_file, mock_sent_log):
     """--yes auto-sends all eligible without prompting."""
     runner = CliRunner()
-    with patch("welcomer.cli.fetch_recipients", return_value=_eligible_recs()):
-        result = runner.invoke(main, ["--config", str(config_file), "--yes"])
+    with (
+        patch("welcomer.cli.fetch_recipients", return_value=_eligible_recs()),
+        patch("welcomer.cli.send_email"),
+    ):
+        result = runner.invoke(main, ["--config", str(smtp_config_file), "--yes"])
     assert result.exit_code == 0
     assert "interactively" not in result.output
     assert mock_sent_log.exists()
@@ -745,7 +1159,7 @@ def test_yes_dry_run_does_not_write_sent_log(config_file, mock_sent_log):
     assert not mock_sent_log.exists()
 
 
-def test_yes_skips_already_sent(config_file, mock_sent_log):
+def test_yes_skips_already_sent(smtp_config_file, mock_sent_log):
     """--yes skips recipients already in sent.log."""
     recs = _eligible_recs()
     alice = recs[0]
@@ -753,8 +1167,11 @@ def test_yes_skips_already_sent(config_file, mock_sent_log):
     mock_sent_log.parent.mkdir(parents=True, exist_ok=True)
     mock_sent_log.write_text(key + "\n", encoding="utf-8")
     runner = CliRunner()
-    with patch("welcomer.cli.fetch_recipients", return_value=recs):
-        result = runner.invoke(main, ["--config", str(config_file), "--yes"])
+    with (
+        patch("welcomer.cli.fetch_recipients", return_value=recs),
+        patch("welcomer.cli.send_email"),
+    ):
+        result = runner.invoke(main, ["--config", str(smtp_config_file), "--yes"])
     assert result.exit_code == 0
     # Only Bob added — Alice was already in log
     logged = mock_sent_log.read_text(encoding="utf-8")
@@ -768,12 +1185,72 @@ def test_yes_skips_already_sent(config_file, mock_sent_log):
 # ---------------------------------------------------------------------------
 
 
-def test_sent_marker_red_x_for_no_email(tmp_path):
-    """Recipient with no email address shows ✗ in the Sent column."""
+def test_sent_marker_empty_for_no_email(tmp_path):
+    """Recipient with no email address shows an empty status cell (no ✗)."""
     recs = [Recipient(name="NoEmail", email=None)]
     result = _run_with_calendars(tmp_path, [("Villa", "P", recs)])
     assert result.exit_code == 0
-    assert "✗" in result.output
+    assert "✗" not in result.output
+    assert "●" not in result.output
+    assert "○" not in result.output
+
+
+def test_sent_marker_empty_for_past_checkin(tmp_path):
+    """Recipient whose check-in is in the past and not yet sent shows an empty status cell."""
+    today = date.today()
+    recs = [
+        Recipient(
+            name="PastCheckin",
+            email="p@x.com",
+            start=today - timedelta(days=3),
+            end=today + timedelta(days=4),
+        )
+    ]
+    result = _run_with_calendars(tmp_path, [("Villa", "P", recs)])
+    assert result.exit_code == 0
+    assert "✗" not in result.output
+    assert "●" not in result.output
+    # ○ might appear for other test recipients; check PastCheckin specifically is in output
+    assert "PastCheckin" in result.output
+
+
+def test_past_checkin_already_sent_shows_checkmark(tmp_path, mock_sent_log):
+    """Past-checkin guest that was already sent shows ✓, not empty."""
+    today = date.today()
+    rec = Recipient(
+        name="SentGuest",
+        email="s@x.com",
+        start=today - timedelta(days=3),
+        end=today + timedelta(days=4),
+    )
+    key = _sent_key(rec, "Villa")
+    mock_sent_log.write_text(key + "\n", encoding="utf-8")
+    result = _run_with_calendars(tmp_path, [("Villa", "P", [rec])])
+    assert result.exit_code == 0
+    assert "✓" in result.output
+
+
+def test_past_checkin_not_sent_in_yes_mode(tmp_path):
+    """Past-checkin recipients are never sent, even with --yes."""
+    today = date.today()
+    recs = [
+        Recipient(
+            name="PastCheckin",
+            email="p@x.com",
+            start=today - timedelta(days=3),
+            end=today + timedelta(days=4),
+        ),
+        Recipient(
+            name="FutureGuest",
+            email="f@x.com",
+            start=today + timedelta(days=5),
+            end=today + timedelta(days=10),
+        ),
+    ]
+    result = _run_with_calendars(
+        tmp_path, [("Villa", "P", recs)], extra_args=["--advance", "99999"]
+    )
+    assert "Would send 1" in result.output  # only FutureGuest
 
 
 def test_sent_marker_circle_for_not_yet_eligible(tmp_path):
@@ -931,17 +1408,17 @@ def test_advance_ineligible_shows_circle(tmp_path):
 
 
 def test_interactive_skips_ineligible_recipients(config_file, mock_sent_log):
-    """Interactive mode does not prompt for recipients outside the advance window."""
+    """Dry-run mode does not prompt even in interactive mode."""
     # MOCK_RECIPIENTS have start=None → not eligible
     runner = CliRunner()
     with patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS):
         # No input provided — if prompts fired, click.confirm would Abort
         result = runner.invoke(main, ["--config", str(config_file), "--dry-run", "--advance", "0"])
     assert result.exit_code == 0
-    assert "interactively" in result.output
+    assert "Would send" in result.output
 
 
-def test_interactive_prompts_eligible_recipients(config_file, mock_sent_log):
+def test_interactive_prompts_eligible_recipients(smtp_config_file, mock_sent_log):
     """Interactive mode prompts only for eligible recipients."""
     eligible_recs = [
         Recipient(
@@ -958,13 +1435,239 @@ def test_interactive_prompts_eligible_recipients(config_file, mock_sent_log):
         ),
     ]
     runner = CliRunner()
-    with patch("welcomer.cli.fetch_recipients", return_value=eligible_recs):
+    with (
+        patch("welcomer.cli.fetch_recipients", return_value=eligible_recs),
+        patch("welcomer.cli.send_email"),
+    ):
         # advance=14 → Alice (5 days) eligible, Bob (200 days) not
         # Only one prompt (Alice) → one "y"
-        result = runner.invoke(main, ["--config", str(config_file), "--advance", "14"], input="y\n")
+        result = runner.invoke(
+            main, ["--config", str(smtp_config_file), "--advance", "14"], input="y\n"
+        )
     assert result.exit_code == 0
     assert "interactively" in result.output
     # Alice was confirmed → in sent.log
     assert mock_sent_log.exists()
     assert "Alice" in mock_sent_log.read_text(encoding="utf-8")
     assert "Bob" not in mock_sent_log.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# SMTP sending
+# ---------------------------------------------------------------------------
+
+TOML_WITH_SMTP = """\
+subject = "Welcome, {name}!"
+body = "Hi {name}, glad to have you."
+
+[smtp]
+host = "localhost"
+port = 1025
+from = "welcomer@example.com"
+
+[[calendars]]
+name = "Test Cal"
+url = "https://example.com/test.ics"
+"""
+
+
+@pytest.fixture
+def smtp_config_file(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text(TOML_WITH_SMTP)
+    return p
+
+
+def _eligible_recipients():
+    from datetime import date, timedelta
+
+    return [
+        Recipient(
+            name="Alice",
+            email="alice@example.com",
+            start=date.today() + timedelta(days=3),
+            end=date.today() + timedelta(days=7),
+        ),
+    ]
+
+
+def test_send_email_called_on_real_send(smtp_config_file):
+    """With smtp configured, send_email is called for each eligible recipient."""
+    with (
+        patch("welcomer.cli.fetch_recipients", return_value=_eligible_recipients()),
+        patch("welcomer.cli.send_email") as mock_send,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(main, ["--config", str(smtp_config_file), "--yes"])
+    assert result.exit_code == 0
+    mock_send.assert_called_once()
+    assert mock_send.call_args[0][1] == "alice@example.com"
+
+
+def test_send_email_not_called_on_dry_run(smtp_config_file):
+    """--dry-run must never call send_email even with smtp configured."""
+    with (
+        patch("welcomer.cli.fetch_recipients", return_value=_eligible_recipients()),
+        patch("welcomer.cli.send_email") as mock_send,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(main, ["--config", str(smtp_config_file), "--dry-run", "--yes"])
+    assert result.exit_code == 0
+    mock_send.assert_not_called()
+
+
+def test_no_smtp_config_prints_warning(config_file):
+    """Missing [smtp] section on a real send (not dry-run) prints a warning."""
+    with patch("welcomer.cli.fetch_recipients", return_value=_eligible_recipients()):
+        runner = CliRunner()
+        result = runner.invoke(main, ["--config", str(config_file), "--yes"])
+    assert result.exit_code == 0
+    assert "smtp" in result.output.lower()
+
+
+def test_no_smtp_config_no_warning_on_dry_run(config_file):
+    """Missing [smtp] section is silent in --dry-run mode."""
+    with patch("welcomer.cli.fetch_recipients", return_value=_eligible_recipients()):
+        runner = CliRunner()
+        result = runner.invoke(main, ["--config", str(config_file), "--dry-run", "--yes"])
+    assert result.exit_code == 0
+    assert "Warning" not in result.output
+
+
+def test_smtp_failure_does_not_mark_sent(smtp_config_file, mock_sent_log):
+    """If send_email raises, the recipient is not recorded in sent.log."""
+    with (
+        patch("welcomer.cli.fetch_recipients", return_value=_eligible_recipients()),
+        patch("welcomer.cli.send_email", side_effect=Exception("connection refused")),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(main, ["--config", str(smtp_config_file), "--yes"])
+    assert result.exit_code == 0
+    assert "Failed to send" in result.output
+    assert not mock_sent_log.exists()
+
+
+def test_sent_log_written_after_successful_send(smtp_config_file, mock_sent_log):
+    """Successful send is recorded in sent.log."""
+    with (
+        patch("welcomer.cli.fetch_recipients", return_value=_eligible_recipients()),
+        patch("welcomer.cli.send_email"),
+    ):
+        runner = CliRunner()
+        runner.invoke(main, ["--config", str(smtp_config_file), "--yes"])
+    assert mock_sent_log.exists()
+    assert "Alice" in mock_sent_log.read_text(encoding="utf-8")
+
+
+def test_interactive_send_calls_send_email(smtp_config_file, mock_sent_log):
+    """Interactive mode calls send_email when user confirms."""
+    with (
+        patch("welcomer.cli.fetch_recipients", return_value=_eligible_recipients()),
+        patch("welcomer.cli.send_email") as mock_send,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["--config", str(smtp_config_file), "--advance", "14"], input="y\n"
+        )
+    assert result.exit_code == 0
+    mock_send.assert_called_once()
+    assert mock_send.call_args[0][1] == "alice@example.com"
+
+
+# ---------------------------------------------------------------------------
+# --silent flag
+# ---------------------------------------------------------------------------
+
+
+def test_silent_suppresses_loaded_message(config_file):
+    runner = CliRunner()
+    with patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS):
+        result = runner.invoke(
+            main, ["--config", str(config_file), "--dry-run", "--yes", "--silent"]
+        )
+    assert result.exit_code == 0
+    assert "Loaded" not in result.output
+
+
+def test_silent_suppresses_would_send_message(config_file):
+    runner = CliRunner()
+    with patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS):
+        result = runner.invoke(
+            main, ["--config", str(config_file), "--dry-run", "--yes", "--silent"]
+        )
+    assert result.exit_code == 0
+    assert "Would send" not in result.output
+
+
+def test_silent_still_shows_table(config_file):
+    runner = CliRunner()
+    with patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS):
+        result = runner.invoke(
+            main, ["--config", str(config_file), "--dry-run", "--yes", "--silent"]
+        )
+    assert result.exit_code == 0
+    assert "Alice" in result.output
+
+
+def test_without_silent_shows_loaded_message(config_file):
+    runner = CliRunner()
+    with patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS):
+        result = runner.invoke(main, ["--config", str(config_file), "--dry-run", "--yes"])
+    assert "Loaded" in result.output
+
+
+def test_silent_short_flag(config_file):
+    """-s is an alias for --silent."""
+    runner = CliRunner()
+    with patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS):
+        result = runner.invoke(main, ["--config", str(config_file), "--dry-run", "--yes", "-s"])
+    assert result.exit_code == 0
+    assert "Loaded" not in result.output
+    assert "Would send" not in result.output
+
+
+def test_silent_suppresses_sent_log_message(config_file):
+    """--silent must suppress the 'Sent log will be created' line."""
+    runner = CliRunner()
+    with patch("welcomer.cli.fetch_recipients", return_value=MOCK_RECIPIENTS):
+        result = runner.invoke(main, ["--config", str(config_file), "--dry-run", "--yes", "-s"])
+    assert result.exit_code == 0
+    assert "Sent log" not in result.output
+
+
+def test_silent_does_not_suppress_overlap_warning():
+    """Overlap warnings must print even with --silent / -s."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["--dry-run", "--test-config", "-s"])
+    assert result.exit_code == 0
+    assert "⚠ Overlap" in result.output
+
+
+def test_overlap_warning_shown_outside_days_window(tmp_path):
+    """Overlap warning appears even when overlapping events fall outside --days."""
+    p = tmp_path / "config.toml"
+    p.write_text(
+        'subject = "Hi"\nbody = "Hi"\n'
+        '[[calendars]]\nname = "Villa"\nprovider = "P"\nurl = "https://x.com/a.ics"\n'
+        '[[calendars]]\nname = "Villa"\nprovider = "Q"\nurl = "https://x.com/b.ics"\n'
+    )
+    # Two overlapping reservations 60 days out — outside --days 1
+    far = date.today() + timedelta(days=60)
+    recs_a = [Recipient(name="Alice", email="a@x.com", start=far, end=far + timedelta(days=5))]
+    recs_b = [
+        Recipient(
+            name="Bob",
+            email="b@x.com",
+            start=far + timedelta(days=2),
+            end=far + timedelta(days=7),
+        )
+    ]
+
+    def _fetch(url, force_refresh=False):
+        return recs_a if "a.ics" in url else recs_b
+
+    runner = CliRunner()
+    with patch("welcomer.cli.fetch_recipients", side_effect=_fetch):
+        result = runner.invoke(main, ["--config", str(p), "--dry-run", "--days", "1"])
+    assert result.exit_code == 0
+    assert "⚠ Overlap" in result.output

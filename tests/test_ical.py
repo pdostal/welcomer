@@ -9,8 +9,12 @@ import httpx
 import pytest
 
 from welcomer.ical import (
+    _adults_from_description,
+    _email_from_description,
     _extract_cn,
+    _kids_from_description,
     _parse_email,
+    _phone_from_description,
     _to_date,
     fetch_recipients,
     recipients_from_ical,
@@ -246,7 +250,11 @@ def test_extract_cn_strips_quotes():
 def test_fetch_recipients_success():
     mock_response = MagicMock()
     mock_response.content = ICAL_WITH_ATTENDEES
-    with patch("httpx.get", return_value=mock_response) as mock_get:
+    with (
+        patch("welcomer.ical.get_cached", return_value=None),
+        patch("welcomer.ical.save_cache"),
+        patch("httpx.get", return_value=mock_response) as mock_get,
+    ):
         result = fetch_recipients("https://example.com/cal.ics")
     mock_get.assert_called_once_with(
         "https://example.com/cal.ics", follow_redirects=True, timeout=15
@@ -260,12 +268,17 @@ def test_fetch_recipients_raises_on_http_error():
     mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
         "404", request=MagicMock(), response=MagicMock()
     )
-    with patch("httpx.get", return_value=mock_response), pytest.raises(httpx.HTTPStatusError):
+    with (
+        patch("welcomer.ical.get_cached", return_value=None),
+        patch("httpx.get", return_value=mock_response),
+        pytest.raises(httpx.HTTPStatusError),
+    ):
         fetch_recipients("https://example.com/cal.ics")
 
 
 def test_fetch_recipients_raises_on_timeout():
     with (
+        patch("welcomer.ical.get_cached", return_value=None),
         patch("httpx.get", side_effect=httpx.TimeoutException("timed out")),
         pytest.raises(httpx.TimeoutException),
     ):
@@ -310,3 +323,105 @@ def test_echalupy_dates():
     assert by_name["Josef Novák"].end == date(2026, 4, 19)
     assert by_name["Tomáš Jedno"].start == date(2026, 6, 11)
     assert by_name["Tomáš Jedno"].end == date(2026, 6, 13)
+
+
+# --- _email_from_description unit tests ---
+
+
+def test_email_from_description_extracts_value():
+    assert _email_from_description("Email: foo@example.com\n") == "foo@example.com"
+
+
+def test_email_from_description_empty_field_returns_empty():
+    # The problematic case: empty Email followed by Dospělí on the next line.
+    # \s* used to gobble the newline and match "Dospělí:" as the email value.
+    assert _email_from_description("Email: \nDospělí: 2, děti 0\n") == ""
+
+
+def test_email_from_description_no_field_returns_empty():
+    assert _email_from_description("Telefon: 123456789\n") == ""
+
+
+# --- _phone_from_description unit tests ---
+
+
+def test_phone_from_description_empty_field_returns_empty():
+    assert _phone_from_description("Telefon: \nEmail: foo@bar.com\n") == ""
+
+
+# --- _adults_from_description unit tests ---
+
+
+def test_adults_from_description_parses_count():
+    assert _adults_from_description("Dospělí: 2, děti 0\n") == 2
+
+
+def test_adults_from_description_zero():
+    assert _adults_from_description("Dospělí: 0, děti 1\n") == 0
+
+
+def test_adults_from_description_missing_returns_none():
+    assert _adults_from_description("Email: foo@example.com\n") is None
+
+
+def test_adults_from_description_full_echalupy_block():
+    desc = "Telefon: \nEmail: \nDospělí: 3, děti 1\n"
+    assert _adults_from_description(desc) == 3
+
+
+# --- _kids_from_description unit tests ---
+
+
+def test_kids_from_description_parses_count():
+    assert _kids_from_description("Dospělí: 2, děti 1\n") == 1
+
+
+def test_kids_from_description_zero():
+    assert _kids_from_description("Dospělí: 2, děti 0\n") == 0
+
+
+def test_kids_from_description_missing_returns_none():
+    assert _kids_from_description("Email: foo@example.com\n") is None
+
+
+# --- adults/kids wired through recipients_from_ical ---
+
+ICAL_WITH_ADULTS_KIDS = (
+    b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//Test//EN\r\n"
+    b"BEGIN:VEVENT\r\n"
+    b"SUMMARY:Jan Nov\xc3\xa1k\r\n"
+    b"DTSTART;VALUE=DATE:20260601\r\n"
+    b"DTEND;VALUE=DATE:20260605\r\n"
+    b"DESCRIPTION:Telefon: 123456789\\nEmail: jan@example.com\\n"
+    b"Dosp\xc4\x9bl\xc3\xad: 2\\, d\xc4\x9bti 1\\n\r\n"
+    b"END:VEVENT\r\nEND:VCALENDAR\r\n"
+)
+
+ICAL_EMPTY_EMAIL_WITH_ADULTS = b"""\
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Test//Test//EN
+BEGIN:VEVENT
+SUMMARY:Pavel Noname
+DTSTART;VALUE=DATE:20260601
+DTEND;VALUE=DATE:20260605
+DESCRIPTION:Telefon: \\nEmail: \\nDosp\xc4\x9bl\xc3\xad: 2\\, d\xc4\x9bti 0\\n
+END:VEVENT
+END:VCALENDAR
+"""
+
+
+def test_adults_and_kids_parsed_from_ical():
+    recipients = recipients_from_ical(ICAL_WITH_ADULTS_KIDS)
+    assert len(recipients) == 1
+    assert recipients[0].adults == 2
+    assert recipients[0].kids == 1
+
+
+def test_empty_email_not_replaced_by_dospe_li():
+    """Regression: empty Email field must not be filled with 'Dospělí:'."""
+    recipients = recipients_from_ical(ICAL_EMPTY_EMAIL_WITH_ADULTS)
+    assert len(recipients) == 1
+    assert recipients[0].email == ""
+    assert recipients[0].adults == 2
+    assert recipients[0].kids == 0

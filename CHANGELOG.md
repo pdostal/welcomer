@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-05
+
+### Added
+
+- **Multi-property merging** — when the same guest (identical name, provider, check-in, and
+  check-out) appears across multiple properties, they are merged into a single **Multi** entry and
+  only one welcome email is sent
+- **In-progress reservations shown** — reservations that have already started but not yet ended are
+  included in the output; checkout-today reservations are included too
+- **Active reservations highlighted in blue** — guest name shown in blue when check-in ≤ today ≤
+  check-out (ongoing stay), green otherwise
+- **`--silent / -s` flag** — suppresses informational messages (loaded, would-send, sent-log);
+  overlap warnings always print regardless
+- **Overlap detection extended to Multi entries** — a Multi guest's constituent properties are each
+  checked for conflicts against other providers; the warning shows `Multi · provider` for merged
+  entries and `Property · provider` for single-property entries
+
+### Changed
+
+- Past-check-in guests never receive a welcome email; the `Sent` cell shows `✓` if previously sent
+  or empty if not (was `✗` for no-email, now consistently empty for both no-email and past-check-in)
+- Overlap warning date range separator changed from `–` to `→`
+
+### Removed
+
+- `✗` sent-status marker replaced by an empty cell
+
 ## [0.3.0] - 2026-04-03
 
 ### Added

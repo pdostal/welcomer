@@ -14,29 +14,142 @@ from .config import (
     LOCAL_CONFIG_PATH,
     SENT_LOG_PATH,
     XDG_CONFIG_PATH,
+    SmtpConfig,
     WelcomerConfig,
     find_default_config,
 )
 from .core import build_welcomes
 from .ical import Recipient, fetch_recipients, recipients_from_ical
+from .smtp import send_email
 
 console = Console()
 
 
-def _detect_overlaps(recipients: list[Recipient]) -> list[tuple[Recipient, Recipient]]:
-    """Return pairs with the same property whose date ranges overlap."""
+def _detect_overlaps(
+    recipients: list[Recipient],
+) -> list[tuple[Recipient, Recipient, str]]:
+    """Return (a, b, overlapping_property) triples for date-range overlaps.
+
+    Multi-property (merged) recipients are expanded into each constituent property
+    bucket.  The third element of each triple is the property bucket where the
+    overlap was detected — used to show the specific property name in the warning
+    rather than the generic "Multi" label.
+    """
     by_property: dict[str, list[Recipient]] = {}
     for rec in recipients:
+        if not rec.start or not rec.end:
+            continue
         prop = rec.extra.get("property", "")
-        if prop and rec.start and rec.end:
-            by_property.setdefault(prop, []).append(rec)
+        # Multi entries store constituent props in "properties"; fall back to [prop].
+        constituent = rec.extra.get("properties") or ([prop] if prop else [])
+        for p in constituent:
+            by_property.setdefault(p, []).append(rec)
     overlaps = []
-    for recs in by_property.values():
+    seen: set[tuple[int, int]] = set()
+    for bucket_prop, recs in by_property.items():
         for i, a in enumerate(recs):
             for b in recs[i + 1 :]:
                 if a.start < b.end and b.start < a.end:
-                    overlaps.append((a, b))
+                    pair = (min(id(a), id(b)), max(id(a), id(b)))
+                    if pair not in seen:
+                        seen.add(pair)
+                        overlaps.append((a, b, bucket_prop))
     return overlaps
+
+
+def _normalize_name(name: str) -> str:
+    return " ".join(name.strip().lower().split())
+
+
+def _name_color(start: date | None, end: date | None, today: date) -> str:
+    """Return 'blue' for active-today reservations, 'green' for all others.
+
+    Active-today means: check-in today, currently ongoing, or check-out today.
+    """
+    if start is not None and end is not None and start <= today <= end:
+        return "blue"
+    return "green"
+
+
+def _merge_multi_property(recipients: list[Recipient]) -> list[Recipient]:
+    """Collapse same-provider, same-name, exact-date recipients across different properties.
+
+    When the same guest appears in two or more calendars from the same booking provider
+    (different properties, identical check-in and check-out dates), merge them into a
+    single entry with ``extra["property"] = "Multi"``. This prevents duplicate emails.
+    """
+    n = len(recipients)
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x: int, y: int) -> None:
+        parent[find(x)] = find(y)
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            ri, rj = recipients[i], recipients[j]
+            prov_i = ri.extra.get("provider", "")
+            prov_j = rj.extra.get("provider", "")
+            if not prov_i or prov_i != prov_j:
+                continue
+            prop_i = ri.extra.get("property", "")
+            prop_j = rj.extra.get("property", "")
+            if prop_i == prop_j:
+                continue
+            if _normalize_name(ri.name) != _normalize_name(rj.name):
+                continue
+            if ri.start != rj.start or ri.end != rj.end:
+                continue
+            union(i, j)
+
+    clusters: dict[int, list[int]] = {}
+    for i in range(n):
+        root = find(i)
+        clusters.setdefault(root, []).append(i)
+
+    skip: set[int] = set()
+    replacements: dict[int, Recipient] = {}
+
+    for _root, indices in clusters.items():
+        if len(indices) < 2:
+            continue
+        props = {recipients[i].extra.get("property", "") for i in indices}
+        if len(props) < 2:
+            continue
+        base = recipients[indices[0]]
+        starts = [recipients[i].start for i in indices if recipients[i].start]
+        ends = [recipients[i].end for i in indices if recipients[i].end]
+        email = base.email or next(
+            (recipients[i].email for i in indices if recipients[i].email), None
+        )
+        phone = base.phone or next(
+            (recipients[i].phone for i in indices if recipients[i].phone), ""
+        )
+        merged = Recipient(
+            name=base.name,
+            email=email,
+            phone=phone,
+            adults=base.adults,
+            kids=base.kids,
+            start=min(starts) if starts else base.start,
+            end=max(ends) if ends else base.end,
+            extra={**base.extra, "property": "Multi", "properties": sorted(props)},
+        )
+        replacements[indices[0]] = merged
+        for i in indices[1:]:
+            skip.add(i)
+
+    result = []
+    for i, rec in enumerate(recipients):
+        if i in skip:
+            continue
+        result.append(replacements.get(i, rec))
+    return result
 
 
 def _apply_filters(calendars, property_filter, provider_filter):
@@ -47,17 +160,24 @@ def _apply_filters(calendars, property_filter, provider_filter):
     return calendars
 
 
-def _load_calendar(url: str, base_dir: Path) -> list[Recipient]:
+def _load_calendar(
+    url: str, base_dir: Path, force_refresh: bool = False
+) -> tuple[list[Recipient], bool]:
     """Load recipients from a URL, absolute path, or relative path.
 
-    Relative paths are resolved against base_dir (the config file's directory).
+    Returns ``(recipients, from_cache)`` where ``from_cache`` is True when the
+    data was served from the 5-hour disk cache.  Always False for local paths.
+    Remote URLs are cached for 5 hours; pass force_refresh=True to bypass.
     """
     if url.startswith(("http://", "https://")):
-        return fetch_recipients(url)
+        from .cache import get_cached
+
+        from_cache = not force_refresh and get_cached(url) is not None
+        return fetch_recipients(url, force_refresh=force_refresh), from_cache
     path = Path(url)
     if not path.is_absolute():
         path = base_dir / path
-    return recipients_from_ical(path.read_bytes())
+    return recipients_from_ical(path.read_bytes()), False
 
 
 def _sent_key(rec: Recipient, prop: str) -> str:
@@ -76,18 +196,18 @@ def _append_sent_log(path: Path, key: str) -> None:
         f.write(key + "\n")
 
 
-def _sent_marker(email: str, already_sent: bool, eligible: bool) -> str:
+def _sent_marker(email: str, already_sent: bool, eligible: bool, past_checkin: bool) -> str:
     """Return a Rich-markup sent-status cell, always 4 visible chars wide.
 
-    ✗  red    — no email address, cannot send
     ✓  green  — already sent (in sent.log)
-    ●  green  — eligible to send now (start ≤ today + advance days), not yet sent
+    ●  green  — eligible to send now (today ≤ check-in ≤ today + advance days)
     ○  yellow — not yet eligible (check-in too far in the future)
+    (empty)   — no email address, or check-in already passed and not yet sent
     """
-    if email == "none":
-        return "[red]✗   [/red]"
     if already_sent:
         return "[green]✓   [/green]"
+    if email == "none" or past_checkin:
+        return "    "
     if eligible:
         return "[green]●   [/green]"
     return "[yellow]○   [/yellow]"
@@ -162,6 +282,22 @@ def _sent_marker(email: str, already_sent: bool, eligible: bool) -> str:
     default=False,
     help="Also print the rendered subject and message body for each recipient.",
 )
+@click.option(
+    "--force-refresh",
+    is_flag=True,
+    default=False,
+    help=(
+        "Bypass the 5-hour calendar cache and re-fetch all remote URLs."
+        " Has no effect on local file paths or --test-config."
+    ),
+)
+@click.option(
+    "--silent",
+    "-s",
+    is_flag=True,
+    default=False,
+    help="Suppress 'Loaded N event(s)' and send-count summary lines.",
+)
 @click.version_option()
 def main(
     config: Path | None,
@@ -173,6 +309,8 @@ def main(
     days: int | None,
     advance: int | None,
     print_note: bool,
+    force_refresh: bool,
+    silent: bool,
 ) -> None:
     """Send configurable welcome messages loaded from iCal calendar URLs.
 
@@ -184,12 +322,13 @@ def main(
         raise click.UsageError("--test-config requires --dry-run")
 
     sent_keys = _load_sent_log(SENT_LOG_PATH)
-    if test_config:
-        console.print("[dim]Sent log: test mode, 1 entry pre-seeded[/dim]")
-    elif SENT_LOG_PATH.exists():
-        console.print(f"[dim]Sent log: {SENT_LOG_PATH} ({len(sent_keys)} entries)[/dim]")
-    else:
-        console.print(f"[dim]Sent log will be created at: {SENT_LOG_PATH}[/dim]")
+    if not silent:
+        if test_config:
+            console.print("[dim]Sent log: test mode, 1 entry pre-seeded[/dim]")
+        elif SENT_LOG_PATH.exists():
+            console.print(f"[dim]Sent log: {SENT_LOG_PATH} ({len(sent_keys)} entries)[/dim]")
+        else:
+            console.print(f"[dim]Sent log will be created at: {SENT_LOG_PATH}[/dim]")
 
     recipients = []
 
@@ -210,9 +349,10 @@ def main(
                 r.extra["property"] = cal.name
                 r.extra["provider"] = cal.provider
             provider_str = f" · {cal.provider}" if cal.provider else ""
-            console.print(
-                f"[dim]Loaded {len(recs)} recipient(s) from {cal.name}{provider_str}[/dim]"
-            )
+            if not silent:
+                console.print(
+                    f"[dim]Loaded {len(recs)} event(s) from {cal.name}{provider_str}[/dim]"
+                )
             recipients.extend(recs)
     else:
         config_path = config or find_default_config()
@@ -238,40 +378,58 @@ def main(
         ):
             label = cal.name or cal.url
             try:
-                found = _load_calendar(cal.url, config_path.parent)
+                found, from_cache = _load_calendar(
+                    cal.url, config_path.parent, force_refresh=force_refresh
+                )
                 for r in found:
                     r.extra["property"] = cal.name
                     r.extra["provider"] = cal.provider
                 provider_str = f" · {cal.provider}" if cal.provider else ""
-                console.print(
-                    f"[dim]Loaded {len(found)} recipient(s) from {label}{provider_str}[/dim]"
-                )
+                cache_str = " (cached)" if from_cache else ""
+                if not silent:
+                    console.print(
+                        f"[dim]Loaded {len(found)} event(s) from "
+                        f"{label}{provider_str}{cache_str}[/dim]"
+                    )
                 recipients.extend(found)
             except Exception as e:
                 console.print(f"[red]Failed to load {label}:[/red] {e}")
 
     today = date.today()
 
+    # Merge same-provider, same-name guests that appear in multiple properties
+    # into a single "Multi" entry to avoid duplicate emails.
+    recipients = _merge_multi_property(recipients)
+
+    # Detect overlaps across ALL loaded events before any day-window filter,
+    # so warnings appear even when overlapping reservations fall outside --days.
+    overlaps = _detect_overlaps(recipients)
+
     effective_days = days if days is not None else cfg.days
     if effective_days is not None:
         cutoff = today + timedelta(days=effective_days)
-        recipients = [rec for rec in recipients if rec.start and today <= rec.start <= cutoff]
+        recipients = [
+            rec
+            for rec in recipients
+            if rec.start and rec.start <= cutoff and rec.end is not None and rec.end >= today
+        ]
 
     effective_advance = advance if advance is not None else cfg.advance
-
-    overlaps = _detect_overlaps(recipients)
     overlapping_recipients: set[int] = set()
 
-    for a, b in overlaps:
-        prop = a.extra.get("property", "")
+    for a, b, _overlap_prop in overlaps:
+        a_prop = a.extra.get("property", "")
+        b_prop = b.extra.get("property", "")
         a_prov = a.extra.get("provider", "")
         b_prov = b.extra.get("provider", "")
+        a_cal = f"{a_prop} · {a_prov}" if a_prov else a_prop
+        b_cal = f"{b_prop} · {b_prov}" if b_prov else b_prop
         overlapping_recipients.add(id(a))
         overlapping_recipients.add(id(b))
         console.print(
-            f"[bold red]⚠ Overlap at {prop}:[/bold red] "
-            f"[red]{a.name} ({a_prov}, {a.start}–{a.end})"
-            f" × {b.name} ({b_prov}, {b.start}–{b.end})[/red]"
+            f"[bold red]⚠ Overlap:[/bold red] "
+            f"[red]{a.name} ({a_cal}, {a.start} → {a.end})"
+            f" × {b.name} ({b_cal}, {b.start} → {b.end})[/red]"
         )
 
     if not recipients:
@@ -291,8 +449,14 @@ def main(
         duration = f"{(rec.end - rec.start).days} days" if rec.start and rec.end else ""
         prop_sep = " · " if prop and provider else ""
         prop_col = f"{prop}{prop_sep}{provider}"
-        eligible = rec.start is not None and rec.start <= today + timedelta(days=effective_advance)
+        past_checkin = rec.start is not None and rec.start < today
+        eligible = rec.start is not None and today <= rec.start <= today + timedelta(
+            days=effective_advance
+        )
         display_name = "Reservation" if r.recipient == "CLOSED - Not available" else r.recipient
+        adults_str = f"{rec.adults} adults" if rec.adults else ""
+        kids_str = f"{rec.kids} kids" if rec.kids else ""
+        guests = ", ".join(x for x in (adults_str, kids_str) if x)
         rows.append(
             (
                 display_name,
@@ -302,6 +466,7 @@ def main(
                 prop_col,
                 r.email or "none",
                 phone,
+                guests,
                 r,
                 prop,
                 provider,
@@ -309,10 +474,13 @@ def main(
                 rec.end,
                 rec,
                 eligible,
+                past_checkin,
             )
         )
 
-    rows.sort(key=lambda row: (row[10] or date.max, row[11] or date.max, row[8], row[9]))
+    rows.sort(key=lambda row: (row[11] or date.max, row[12] or date.max, row[9], row[10]))
+
+    show_guests = any(row[7] for row in rows)
 
     _dates = [f"{r[1]} → {r[2]}" if r[1] and r[2] else r[1] or r[2] or "" for r in rows]
     w_name = max(max(len(row[0]) for row in rows), len("👤 Name") + 1)
@@ -320,8 +488,12 @@ def main(
     w_dur = max(max(len(row[3]) for row in rows), len("⏳") + 1)
     w_prop = max(max(len(row[4]) for row in rows), len("🏡 Calendar") + 1)
     w_email = max(max(len(row[5]) for row in rows), len("📧 E-mail") + 1)
+    # Phone needs a fixed width when guests are shown so the guests column aligns.
+    w_phone = max(max(len(row[6]) for row in rows), len("📞 Phone")) if show_guests else 0
+    # +2 compensates for the double-width 👥 emoji so data values align under the label.
+    w_guests = max(max(len(row[7]) for row in rows), len("Guests") + 1) + 2 if show_guests else 0
 
-    console.print(
+    header = (
         f"[bold dim]"
         f"{'👤 Name':<{w_name - 1}}  "
         f"{'📅 Date':<{w_date - 1}}  "
@@ -329,9 +501,13 @@ def main(
         f"{'✉️':<4}  "
         f"{'🏡 Calendar':<{w_prop - 1}}  "
         f"{'📧 E-mail':<{w_email - 1}}  "
-        f"📞 Phone"
-        f"[/bold dim]"
     )
+    if show_guests:
+        header += f"{'📞 Phone':<{w_phone - 1}}  {'👥 Guests':<{w_guests - 2}}"
+    else:
+        header += "📞 Phone"
+    header += "[/bold dim]"
+    console.print(header)
 
     for (
         name,
@@ -341,6 +517,7 @@ def main(
         prop_col,
         email,
         phone,
+        guests,
         r,
         _prop,
         _prov,
@@ -348,27 +525,53 @@ def main(
         _end,
         rec,
         eligible,
+        _past_checkin,
     ) in rows:
         date_color = "red" if id(rec) in overlapping_recipients else "cyan"
         already_sent = _sent_key(rec, _prop) in sent_keys
         date_col = f"{start} → {end}" if start and end else start or end or ""
-        console.print(
-            f"[bold green]{name:<{w_name}}[/bold green]"
+        name_color = _name_color(_start, _end, today)
+        line = (
+            f"[bold {name_color}]{name:<{w_name}}[/bold {name_color}]"
             f"  [{date_color}]{date_col:<{w_date}}[/{date_color}]"
             f"  [{date_color}]{duration:<{w_dur}}[/{date_color}]"
-            f"  {_sent_marker(email, already_sent, eligible)}"
+            f"  {_sent_marker(email, already_sent, eligible, _past_checkin)}"
             f"  {prop_col:<{w_prop}}"
             f"  [bold blue]{escape(email):<{w_email}}[/bold blue]"
-            f"  [bold green]{escape(phone)}[/bold green]"
         )
+        if show_guests:
+            line += (
+                f"  [bold green]{escape(phone):<{w_phone}}[/bold green]"
+                f"  [dim]{escape(guests):<{w_guests}}[/dim]"
+            )
+        else:
+            line += f"  [bold green]{escape(phone)}[/bold green]"
+        console.print(line)
         if print_note:
             console.print(f"  [yellow]{r.subject}[/yellow]")
             console.print(Markdown(r.body))
 
+    if not dry_run and not test_config and cfg.smtp is None:
+        console.print(
+            "[yellow]Warning: no [smtp] section in config — emails will not be sent.[/yellow]"
+        )
+
+    def _do_send(smtp_cfg: SmtpConfig | None, result, email_addr: str) -> bool:
+        """Attempt to send one email. Returns True on success."""
+        if smtp_cfg is None:
+            return False
+        try:
+            send_email(smtp_cfg, email_addr, result.subject, result.body)
+            return True
+        except Exception as exc:
+            console.print(f"[red]Failed to send to {email_addr}: {exc}[/red]")
+            return False
+
     if test_config:
         sent_count = sum(1 for r in results if r.email)
-        console.print(f"[yellow]Would send {sent_count} message(s).[/yellow]")
-    elif yes:
+        if not silent:
+            console.print(f"[yellow]Would send {sent_count} message(s).[/yellow]")
+    elif yes or dry_run:
         confirmed = 0
         for (
             _name,
@@ -378,6 +581,7 @@ def main(
             _pcol,
             email,
             _phone,
+            _guests,
             _r,
             _prop,
             _prov,
@@ -385,6 +589,7 @@ def main(
             _end,
             rec,
             eligible,
+            _past_checkin,
         ) in rows:
             if email == "none":
                 continue
@@ -394,12 +599,15 @@ def main(
             if key in sent_keys:
                 continue
             if not dry_run:
+                if not _do_send(cfg.smtp, _r, email):
+                    continue
                 _append_sent_log(SENT_LOG_PATH, key)
                 sent_keys.add(key)
             confirmed += 1
         color = "yellow" if dry_run else "green"
         verb = "Would send" if dry_run else "Sent"
-        console.print(f"[{color}]{verb} {confirmed} message(s).[/{color}]")
+        if not silent:
+            console.print(f"[{color}]{verb} {confirmed} message(s).[/{color}]")
     else:
         console.print()
         confirmed = 0
@@ -411,6 +619,7 @@ def main(
             _pcol,
             email,
             _phone,
+            _guests,
             _r,
             _prop,
             _prov,
@@ -418,6 +627,7 @@ def main(
             _end,
             rec,
             eligible,
+            _past_checkin,
         ) in rows:
             if email == "none":
                 continue
@@ -430,9 +640,12 @@ def main(
             prop_str = f" at {_prop}" if _prop else ""
             if click.confirm(f"Send to {name} ({email}){prop_str}{date_str}?", default=False):
                 if not dry_run:
+                    if not _do_send(cfg.smtp, _r, email):
+                        continue
                     _append_sent_log(SENT_LOG_PATH, key)
                     sent_keys.add(key)
                 confirmed += 1
         color = "yellow" if dry_run else "green"
         verb = "Would send" if dry_run else "Sent"
-        console.print(f"[{color}]{verb} {confirmed} message(s) interactively.[/{color}]")
+        if not silent:
+            console.print(f"[{color}]{verb} {confirmed} message(s) interactively.[/{color}]")

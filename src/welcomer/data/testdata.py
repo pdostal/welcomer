@@ -13,6 +13,8 @@ from ..config import CalendarConfig, WelcomerConfig
 from ..ical import Recipient
 
 # Offsets from today (in days) for each test guest
+_KLARA_START = -3  # in-progress: checked in 3 days ago
+_KLARA_END = 4
 _CLOSED_START = 30
 _CLOSED_END = 37
 _RADKA_START = 50  # pre-seeded as already sent
@@ -21,6 +23,8 @@ _ANNA_START = 60
 _ANNA_END = 69
 _NAPUB_OVERLAP_START = 65  # overlaps with Anna (60–69) at Biscuit Château
 _NAPUB_OVERLAP_END = 74
+_TOMAS_START = 10  # same guest at two properties through SnoozePal → merges to Multi
+_TOMAS_END = 17
 _TIPSY_1_START = 80
 _TIPSY_1_END = 87
 _PAVEL_START = 100
@@ -61,6 +65,13 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
             CalendarConfig(name="Biscuit Château", provider="SnoozePal", url=""),
             [
                 Recipient(
+                    name="Tomáš Procházka",
+                    email="tomas.prochazka@email.cz",
+                    phone="+420608901234",
+                    start=t + timedelta(days=_TOMAS_START),
+                    end=t + timedelta(days=_TOMAS_END),
+                ),
+                Recipient(
                     name="Anna Dvořáková",
                     email="anna.dvorakova@seznam.cz",
                     phone="+420603456789",
@@ -96,6 +107,20 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
         (
             CalendarConfig(name="The Snoring Goat", provider="SnoozePal", url=""),
             [
+                Recipient(
+                    name="Klára Novotná",
+                    email="klara.novotna@gmail.com",
+                    phone="+420607890123",
+                    start=t + timedelta(days=_KLARA_START),
+                    end=t + timedelta(days=_KLARA_END),
+                ),
+                Recipient(
+                    name="Tomáš Procházka",
+                    email="tomas.prochazka@email.cz",
+                    phone="+420608901234",
+                    start=t + timedelta(days=_TOMAS_START),
+                    end=t + timedelta(days=_TOMAS_END),
+                ),
                 Recipient(
                     name="Radka Horáčková",
                     email="radka.horac@post.cz",

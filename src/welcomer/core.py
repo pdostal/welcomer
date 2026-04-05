@@ -24,6 +24,8 @@ def _render(template: str, recipient: Recipient) -> str:
         "start": str(recipient.start or ""),
         "end": str(recipient.end or ""),
         "phone": recipient.phone or "unknown",
+        "adults": "" if recipient.adults is None else str(recipient.adults),
+        "kids": "" if recipient.kids is None else str(recipient.kids),
         "property": "",
         "provider": "",
         **recipient.extra,

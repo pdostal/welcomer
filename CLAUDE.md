@@ -11,7 +11,6 @@ uv run welcomer --help
 uv run welcomer --dry-run
 uv run welcomer --dry-run --test-config    # use bundled test config + fixtures, no network needed
 uv run welcomer --dry-run --print-note      # also show rendered subject + body
-uv run welcomer --interactive               # ask before sending each email
 uv run welcomer --config ~/.config/welcomer/config.toml --dry-run
 
 # Tests
@@ -56,7 +55,18 @@ Data flows through three layers:
 1. **`ical.py`** — fetches each calendar URL with `httpx`, parses with `icalendar`, and returns
    `Recipient` objects (name, email, phone, start, end, extra). Extracts from `ATTENDEE` entries;
    falls back to `ORGANIZER`; last resort uses `SUMMARY` + `Description` parsing (`Email:`,
-   `Telefon:`). Phone is extracted from `Description` for all paths.
+   `Telefon:`). Phone is extracted from `Description` for all paths. Remote fetches are cached via
+   `cache.py`.
+
+1. **`cache.py`** — disk cache for remote iCal URLs. Stores raw `.ics` bytes in
+   `~/.config/welcomer/cache/<sha256-of-url>.ics`. TTL is 5 hours (checked via `mtime`). Provides
+   `get_cached(url)` and `save_cache(url, data)`; both accept an optional `cache_dir` override (used
+   in tests).
+
+1. **`smtp.py`** — email sending via stdlib `smtplib`. Single function
+   `send_email(cfg, to, subject, body)`. Supports plain SMTP, STARTTLS (`tls=true`), and SSL
+   (`ssl=true`). Authenticates only when `cfg.username` is set. Body is sent as plain text (the
+   rendered markdown template).
 
 1. **`core.py`** — calls `_render()` to interpolate `{name}`, `{email}`, `{phone}`, `{start}`,
    `{end}`, `{summary}` into `subject`/`body`, producing `WelcomeResult` objects.
@@ -82,15 +92,39 @@ Message template variables: `{name}`, `{email}`, `{phone}`, `{start}`, `{end}`, 
 
 - `--config / -c PATH` — override config file path
 - `--dry-run` — preview output, don't send
-- `--test-config` — use bundled `src/welcomer/data/test_config.toml` + 3 property ICS fixtures
-  (requires `--dry-run`; automatically runs non-interactively)
-- `--interactive / --non-interactive` — ask before sending each eligible email (default: on);
-  records confirmed sends in `~/.config/welcomer/sent.log`; skips already-sent and not-yet-eligible
-  reservations
+- `--test-config` — use bundled test data with 4 properties and 8 events (requires `--dry-run`;
+  automatically runs non-interactively)
+- `--yes` — auto-send all eligible emails without prompting; records sends in
+  `~/.config/welcomer/sent.log`; skips already-sent and not-yet-eligible reservations
 - `--days N` — only show reservations starting within N days; overrides `days` in config
 - `--advance N` — days before check-in when a reservation becomes eligible to send (default: 14);
   overrides `advance` in config
 - `--print-note` — also render subject + markdown body per guest
+- `--force-refresh` — bypass the 5-hour calendar cache and re-fetch all remote URLs; no effect on
+  local file paths or `--test-config`
+- `--silent / -s` — suppress informational output (loaded/sent messages); overlap warnings still
+  print
+
+## SMTP config
+
+Add an `[smtp]` section to enable actual sending. Without it, the app runs in preview-only mode and
+prints a warning on non-dry-run invocations.
+
+```toml
+[smtp]
+host = "smtp.example.com"
+port = 587
+from = "info@myproperty.com"
+username = "info@myproperty.com"   # omit for unauthenticated relay
+password = "secret"
+tls = true    # STARTTLS (port 587)
+# ssl = true  # SSL/TLS (port 465)
+```
+
+For local testing use **Mailpit** (`brew install mailpit`): SMTP on port 1025, web UI on
+`http://localhost:8025`.
+
+If `send_email` raises, the recipient is **not** added to `sent.log` (no false positives).
 
 ## Sent log
 
@@ -99,9 +133,14 @@ Message template variables: `{name}`, `{email}`, `{phone}`, `{start}`, `{end}`, 
 
 The `Sent` column in the output table shows one of four states:
 
-| Symbol | Colour | Meaning | |--------|--------|---------| | `✓` | green | Already sent (in
-sent.log) | | `●` | green | Eligible to send now (check-in ≤ today + advance days) | | `○` | yellow
-| Not yet eligible (check-in too far in the future) | | `✗` | red | No email address — cannot send |
+| Symbol | Colour | Meaning | | ------ | ------ | ------- | | `✓` | green | Already sent (in
+sent.log) | | `●` | green | Eligible to send now (today ≤ check-in ≤ today + advance days) | | `○` |
+yellow | Not yet eligible (check-in too far in the future) | | (empty) | — | No email address, or
+check-in already passed and not yet sent |
+
+Emails are never sent to reservations whose check-in date is in the past — those guests have either
+already arrived or departed. If a welcome was sent before check-in, the row shows `✓`; if it was
+never sent, the status cell is empty.
 
 ## Test fixtures
 
@@ -109,9 +148,11 @@ sent.log) | | `●` | green | Eligible to send now (check-in ≤ today + advance
 - `src/welcomer/data/cal.ics` — same file, packaged as resource (kept in sync with tests/fixtures)
 - `src/welcomer/data/testdata.py` — programmatic test data for `--test-config`; dates are always
   relative to `date.today()` so they never go stale. Four properties (Biscuit Château/SnoozePal,
-  Biscuit Château/NapHub, The Snoring Goat/SnoozePal, The Tipsy Gnome/NapHub) with 8 events total.
-  Biscuit Château always has an overlap between SnoozePal and NapHub. Radka Horáčková is pre-seeded
-  as already sent. Exposes `get_test_calendars()`, `get_pre_sent_key()`, and `TEST_CONFIG`.
+  Biscuit Château/NapHub, The Snoring Goat/SnoozePal, The Tipsy Gnome/NapHub) with 9 events total.
+  Biscuit Château always has an overlap between SnoozePal and NapHub. Tomáš Procházka appears on two
+  properties via the same provider and merges into a "Multi" entry. Klára Novotná is always
+  in-progress (checked in 3 days ago). Radka Horáčková is pre-seeded as already sent. Exposes
+  `get_test_calendars()`, `get_pre_sent_key()`, and `TEST_CONFIG`.
 
 When updating any fixture, copy to both `tests/fixtures/` and `src/welcomer/data/`.
 
