@@ -28,7 +28,7 @@ uv run --with yamllint yamllint .
 # Build
 uv build
 
-# Release (creates GitHub release + container tags automatically)
+# Release (creates GitHub release + PyPI package + container tags automatically)
 # 1. bump version in pyproject.toml
 # 2. add ## [X.Y.Z] section to CHANGELOG.md
 # 3. commit, tag, push:

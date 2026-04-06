@@ -4,6 +4,16 @@ Sends configurable welcome emails to guests loaded from iCal calendar URLs. Buil
 businesses — reads reservations from a calendar and emails each guest a personalised welcome
 message.
 
+## Install
+
+```sh
+pip install welcomer
+# or with uv (recommended)
+uv tool install welcomer
+# or with pipx
+pipx install welcomer
+```
+
 ## Container
 
 ```sh

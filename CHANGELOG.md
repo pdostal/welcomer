@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-04-06
+
+### Added
+
+- **PyPI package** — `pip install welcomer` / `uv tool install welcomer`
+- **MIT licence** — `LICENSE` file added
+
+### Fixed
+
+- Phone numbers with spaces (e.g. `+420 608 901 234`) are now stripped to `+420608901234` on both
+  parse and display
+- Reservations that ended before today are now always hidden, even without `--days`; checkout-today
+  (end == today) remains visible
+
 ## [0.4.0] - 2026-04-05
 
 ### Added
