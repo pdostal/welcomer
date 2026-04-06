@@ -13,7 +13,7 @@ from .cache import get_cached, save_cache
 
 # Pre-compiled regexes for e-chalupy.cz Description field parsing.
 _RE_EMAIL = re.compile(r"Email:[ \t]*([^\s\\,;\n]+)", re.IGNORECASE)
-_RE_PHONE = re.compile(r"Telefon:[ \t]*([^\s\\,;\n]+)", re.IGNORECASE)
+_RE_PHONE = re.compile(r"Telefon:[ \t]*([^\\;\n]+)", re.IGNORECASE)
 _RE_ADULTS = re.compile(r"Dosp[eě]l[ií]:[ \t]*(\d+)", re.IGNORECASE)
 _RE_KIDS = re.compile(r"d[eě]ti[ \t]+(\d+)", re.IGNORECASE)
 
@@ -59,9 +59,12 @@ def _email_from_description(description: str) -> str:
 
 
 def _phone_from_description(description: str) -> str:
-    """Extract phone number from a Description field containing 'Telefon: ...'."""
+    """Extract phone number from a Description field containing 'Telefon: ...'.
+
+    Spaces within the number are stripped so "+420 608 901 234" → "+420608901234".
+    """
     m = _RE_PHONE.search(description)
-    return m.group(1) if m else ""
+    return m.group(1).replace(" ", "").rstrip() if m else ""
 
 
 def _adults_from_description(description: str) -> int | None:

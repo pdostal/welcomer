@@ -349,6 +349,20 @@ def test_phone_from_description_empty_field_returns_empty():
     assert _phone_from_description("Telefon: \nEmail: foo@bar.com\n") == ""
 
 
+def test_phone_from_description_strips_spaces():
+    assert _phone_from_description("Telefon: +420 608 901 234\n") == "+420608901234"
+
+
+def test_phone_from_description_no_spaces_unchanged():
+    assert _phone_from_description("Telefon: +420608901234\n") == "+420608901234"
+
+
+def test_phone_from_description_spaces_and_empty_next_field():
+    """Spaced phone followed by another field on the next line — no bleed-through."""
+    desc = "Telefon: +420 123 456 789\nEmail: foo@bar.com\n"
+    assert _phone_from_description(desc) == "+420123456789"
+
+
 # --- _adults_from_description unit tests ---
 
 

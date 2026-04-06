@@ -131,7 +131,7 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
                 Recipient(
                     name="Jiří Svoboda",
                     email="jiri.svoboda@centrum.cz",
-                    phone="+420606789012",
+                    phone="+420 606 789 012",  # spaces stripped on display
                     start=t + timedelta(days=_JIRI_START),
                     end=t + timedelta(days=_JIRI_END),
                 ),

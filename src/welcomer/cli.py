@@ -265,7 +265,7 @@ def _build_table_rows(
                 duration_str=duration_str,
                 prop_col=prop_col,
                 email=r.email or "",
-                phone=rec.phone or "",
+                phone=(rec.phone or "").replace(" ", ""),
                 guests_str=guests_str,
                 result=r,
                 prop=prop,

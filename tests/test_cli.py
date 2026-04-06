@@ -1722,3 +1722,21 @@ def test_no_phone_displays_empty_not_none(tmp_path):
     result = _run_with_calendars(tmp_path, [("Villa", "P", [rec])])
     assert result.exit_code == 0
     assert "none" not in result.output.lower().split()
+
+
+def test_phone_with_spaces_displayed_without_spaces(tmp_path):
+    """A phone stored with spaces (e.g. '+420 608 901 234') renders without spaces."""
+    rec = Recipient(name="SpacePhone", email="sp@x.com", phone="+420 608 901 234")
+    result = _run_with_calendars(tmp_path, [("Villa", "P", [rec])])
+    assert result.exit_code == 0
+    assert "+420608901234" in result.output
+    assert "+420 608 901 234" not in result.output
+
+
+def test_test_config_jiri_phone_has_no_spaces():
+    """Jiří Svoboda's phone is stored with spaces in testdata but displays without."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["--dry-run", "--test-config"])
+    assert result.exit_code == 0
+    assert "+420606789012" in result.output
+    assert "+420 606 789 012" not in result.output
