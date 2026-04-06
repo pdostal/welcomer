@@ -28,6 +28,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
+      - name: black
+        run: uv run black --check .
+
       - name: taplo
         run: |
           curl -fsSL https://github.com/tamasfe/taplo/releases/latest/download/taplo-linux-x86_64.gz \
