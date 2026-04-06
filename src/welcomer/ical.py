@@ -11,6 +11,12 @@ from icalendar import Calendar, Event
 
 from .cache import get_cached, save_cache
 
+# Pre-compiled regexes for e-chalupy.cz Description field parsing.
+_RE_EMAIL = re.compile(r"Email:[ \t]*([^\s\\,;\n]+)", re.IGNORECASE)
+_RE_PHONE = re.compile(r"Telefon:[ \t]*([^\s\\,;\n]+)", re.IGNORECASE)
+_RE_ADULTS = re.compile(r"Dosp[eě]l[ií]:[ \t]*(\d+)", re.IGNORECASE)
+_RE_KIDS = re.compile(r"d[eě]ti[ \t]+(\d+)", re.IGNORECASE)
+
 
 @dataclass
 class Recipient:
@@ -48,25 +54,25 @@ def _extract_cn(prop) -> str:
 
 def _email_from_description(description: str) -> str:
     """Extract email address from a Description field containing 'Email: ...'."""
-    m = re.search(r"Email:[ \t]*([^\s\\,;\n]+)", description, re.IGNORECASE)
+    m = _RE_EMAIL.search(description)
     return m.group(1) if m else ""
 
 
 def _phone_from_description(description: str) -> str:
     """Extract phone number from a Description field containing 'Telefon: ...'."""
-    m = re.search(r"Telefon:[ \t]*([^\s\\,;\n]+)", description, re.IGNORECASE)
+    m = _RE_PHONE.search(description)
     return m.group(1) if m else ""
 
 
 def _adults_from_description(description: str) -> int | None:
     """Extract adult guest count from 'Dospělí: N' in a Description field."""
-    m = re.search(r"Dosp[eě]l[ií]:[ \t]*(\d+)", description, re.IGNORECASE)
+    m = _RE_ADULTS.search(description)
     return int(m.group(1)) if m else None
 
 
 def _kids_from_description(description: str) -> int | None:
     """Extract child guest count from 'děti N' in a Description field."""
-    m = re.search(r"d[eě]ti[ \t]+(\d+)", description, re.IGNORECASE)
+    m = _RE_KIDS.search(description)
     return int(m.group(1)) if m else None
 
 

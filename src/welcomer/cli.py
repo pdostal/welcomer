@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from .config import (
     WelcomerConfig,
     find_default_config,
 )
-from .core import build_welcomes
+from .core import WelcomeResult, build_welcomes
 from .ical import Recipient, fetch_recipients, recipients_from_ical
 from .smtp import send_email
 
@@ -206,11 +207,78 @@ def _sent_marker(email: str, already_sent: bool, eligible: bool, past_checkin: b
     """
     if already_sent:
         return "[green]✓   [/green]"
-    if email == "none" or past_checkin:
+    if not email or past_checkin:
         return "    "
     if eligible:
         return "[green]●   [/green]"
     return "[yellow]○   [/yellow]"
+
+
+@dataclass
+class _TableRow:
+    display_name: str
+    start_str: str
+    end_str: str
+    duration_str: str
+    prop_col: str
+    email: str
+    phone: str
+    guests_str: str
+    result: WelcomeResult
+    prop: str
+    prov: str
+    start: date | None
+    end: date | None
+    recipient: Recipient
+    eligible: bool
+    past_checkin: bool
+
+
+def _build_table_rows(
+    results: list[WelcomeResult],
+    recipients: list[Recipient],
+    cfg: WelcomerConfig,
+    today: date,
+    effective_advance: int,
+) -> list[_TableRow]:
+    rows = []
+    for r, rec in zip(results, recipients, strict=True):
+        prop = rec.extra.get("property", "")
+        prov = rec.extra.get("provider", "")
+        start_str = rec.start.strftime(cfg.date_format) if rec.start else ""
+        end_str = rec.end.strftime(cfg.date_format) if rec.end else ""
+        duration_str = f"{(rec.end - rec.start).days} days" if rec.start and rec.end else ""
+        prop_col = f"{prop} · {prov}" if prop and prov else prop or prov
+        past_checkin = rec.start is not None and rec.start < today
+        eligible = rec.start is not None and today <= rec.start <= today + timedelta(
+            days=effective_advance
+        )
+        display_name = "Reservation" if r.recipient == "CLOSED - Not available" else r.recipient
+        adults_str = f"{rec.adults} adults" if rec.adults else ""
+        kids_str = f"{rec.kids} kids" if rec.kids else ""
+        guests_str = ", ".join(x for x in (adults_str, kids_str) if x)
+        rows.append(
+            _TableRow(
+                display_name=display_name,
+                start_str=start_str,
+                end_str=end_str,
+                duration_str=duration_str,
+                prop_col=prop_col,
+                email=r.email or "",
+                phone=rec.phone or "",
+                guests_str=guests_str,
+                result=r,
+                prop=prop,
+                prov=prov,
+                start=rec.start,
+                end=rec.end,
+                recipient=rec,
+                eligible=eligible,
+                past_checkin=past_checkin,
+            )
+        )
+    rows.sort(key=lambda row: (row.start or date.max, row.end or date.max, row.prop, row.prov))
+    return rows
 
 
 @click.command()
@@ -437,61 +505,25 @@ def main(
         raise SystemExit(0)
 
     results = build_welcomes(cfg, recipients, dry_run=dry_run)
+    rows = _build_table_rows(results, recipients, cfg, today, effective_advance)
 
-    # Pre-compute plain-text column values for width alignment
-    rows = []
-    for r, rec in zip(results, recipients, strict=True):
-        phone = rec.phone or "none"
-        start = rec.start.strftime(cfg.date_format) if rec.start else ""
-        end = rec.end.strftime(cfg.date_format) if rec.end else ""
-        prop = rec.extra.get("property", "")
-        provider = rec.extra.get("provider", "")
-        duration = f"{(rec.end - rec.start).days} days" if rec.start and rec.end else ""
-        prop_sep = " · " if prop and provider else ""
-        prop_col = f"{prop}{prop_sep}{provider}"
-        past_checkin = rec.start is not None and rec.start < today
-        eligible = rec.start is not None and today <= rec.start <= today + timedelta(
-            days=effective_advance
-        )
-        display_name = "Reservation" if r.recipient == "CLOSED - Not available" else r.recipient
-        adults_str = f"{rec.adults} adults" if rec.adults else ""
-        kids_str = f"{rec.kids} kids" if rec.kids else ""
-        guests = ", ".join(x for x in (adults_str, kids_str) if x)
-        rows.append(
-            (
-                display_name,
-                start,
-                end,
-                duration,
-                prop_col,
-                r.email or "none",
-                phone,
-                guests,
-                r,
-                prop,
-                provider,
-                rec.start,
-                rec.end,
-                rec,
-                eligible,
-                past_checkin,
-            )
-        )
+    show_guests = any(row.guests_str for row in rows)
 
-    rows.sort(key=lambda row: (row[11] or date.max, row[12] or date.max, row[9], row[10]))
-
-    show_guests = any(row[7] for row in rows)
-
-    _dates = [f"{r[1]} → {r[2]}" if r[1] and r[2] else r[1] or r[2] or "" for r in rows]
-    w_name = max(max(len(row[0]) for row in rows), len("👤 Name") + 1)
+    _dates = [
+        f"{r.start_str} → {r.end_str}" if r.start_str and r.end_str else r.start_str or r.end_str
+        for r in rows
+    ]
+    w_name = max(max(len(row.display_name) for row in rows), len("👤 Name") + 1)
     w_date = max(max(len(d) for d in _dates), len("📅 Date") + 1)
-    w_dur = max(max(len(row[3]) for row in rows), len("⏳") + 1)
-    w_prop = max(max(len(row[4]) for row in rows), len("🏡 Calendar") + 1)
-    w_email = max(max(len(row[5]) for row in rows), len("📧 E-mail") + 1)
+    w_dur = max(max(len(row.duration_str) for row in rows), len("⏳") + 1)
+    w_prop = max(max(len(row.prop_col) for row in rows), len("🏡 Calendar") + 1)
+    w_email = max(max(len(row.email) for row in rows), len("📧 E-mail") + 1)
     # Phone needs a fixed width when guests are shown so the guests column aligns.
-    w_phone = max(max(len(row[6]) for row in rows), len("📞 Phone")) if show_guests else 0
+    w_phone = max(max(len(row.phone) for row in rows), len("📞 Phone")) if show_guests else 0
     # +2 compensates for the double-width 👥 emoji so data values align under the label.
-    w_guests = max(max(len(row[7]) for row in rows), len("Guests") + 1) + 2 if show_guests else 0
+    w_guests = (
+        max(max(len(row.guests_str) for row in rows), len("Guests") + 1) + 2 if show_guests else 0
+    )
 
     header = (
         f"[bold dim]"
@@ -509,54 +541,41 @@ def main(
     header += "[/bold dim]"
     console.print(header)
 
-    for (
-        name,
-        start,
-        end,
-        duration,
-        prop_col,
-        email,
-        phone,
-        guests,
-        r,
-        _prop,
-        _prov,
-        _start,
-        _end,
-        rec,
-        eligible,
-        _past_checkin,
-    ) in rows:
-        date_color = "red" if id(rec) in overlapping_recipients else "cyan"
-        already_sent = _sent_key(rec, _prop) in sent_keys
-        date_col = f"{start} → {end}" if start and end else start or end or ""
-        name_color = _name_color(_start, _end, today)
+    for row in rows:
+        date_color = "red" if id(row.recipient) in overlapping_recipients else "cyan"
+        already_sent = _sent_key(row.recipient, row.prop) in sent_keys
+        date_col = (
+            f"{row.start_str} → {row.end_str}"
+            if row.start_str and row.end_str
+            else row.start_str or row.end_str or ""
+        )
+        name_color = _name_color(row.start, row.end, today)
         line = (
-            f"[bold {name_color}]{name:<{w_name}}[/bold {name_color}]"
+            f"[bold {name_color}]{row.display_name:<{w_name}}[/bold {name_color}]"
             f"  [{date_color}]{date_col:<{w_date}}[/{date_color}]"
-            f"  [{date_color}]{duration:<{w_dur}}[/{date_color}]"
-            f"  {_sent_marker(email, already_sent, eligible, _past_checkin)}"
-            f"  {prop_col:<{w_prop}}"
-            f"  [bold blue]{escape(email):<{w_email}}[/bold blue]"
+            f"  [{date_color}]{row.duration_str:<{w_dur}}[/{date_color}]"
+            f"  {_sent_marker(row.email, already_sent, row.eligible, row.past_checkin)}"
+            f"  {row.prop_col:<{w_prop}}"
+            f"  [bold blue]{escape(row.email):<{w_email}}[/bold blue]"
         )
         if show_guests:
             line += (
-                f"  [bold green]{escape(phone):<{w_phone}}[/bold green]"
-                f"  [dim]{escape(guests):<{w_guests}}[/dim]"
+                f"  [bold green]{escape(row.phone):<{w_phone}}[/bold green]"
+                f"  [dim]{escape(row.guests_str):<{w_guests}}[/dim]"
             )
         else:
-            line += f"  [bold green]{escape(phone)}[/bold green]"
+            line += f"  [bold green]{escape(row.phone)}[/bold green]"
         console.print(line)
         if print_note:
-            console.print(f"  [yellow]{r.subject}[/yellow]")
-            console.print(Markdown(r.body))
+            console.print(f"  [yellow]{row.result.subject}[/yellow]")
+            console.print(Markdown(row.result.body))
 
     if not dry_run and not test_config and cfg.smtp is None:
         console.print(
             "[yellow]Warning: no [smtp] section in config — emails will not be sent.[/yellow]"
         )
 
-    def _do_send(smtp_cfg: SmtpConfig | None, result, email_addr: str) -> bool:
+    def _do_send(smtp_cfg: SmtpConfig | None, result: WelcomeResult, email_addr: str) -> bool:
         """Attempt to send one email. Returns True on success."""
         if smtp_cfg is None:
             return False
@@ -573,33 +592,16 @@ def main(
             console.print(f"[yellow]Would send {sent_count} message(s).[/yellow]")
     elif yes or dry_run:
         confirmed = 0
-        for (
-            _name,
-            _start_str,
-            _end_str,
-            _dur,
-            _pcol,
-            email,
-            _phone,
-            _guests,
-            _r,
-            _prop,
-            _prov,
-            _start,
-            _end,
-            rec,
-            eligible,
-            _past_checkin,
-        ) in rows:
-            if email == "none":
+        for row in rows:
+            if not row.email:
                 continue
-            if not eligible:
+            if not row.eligible:
                 continue
-            key = _sent_key(rec, _prop)
+            key = _sent_key(row.recipient, row.prop)
             if key in sent_keys:
                 continue
             if not dry_run:
-                if not _do_send(cfg.smtp, _r, email):
+                if not _do_send(cfg.smtp, row.result, row.email):
                     continue
                 _append_sent_log(SENT_LOG_PATH, key)
                 sent_keys.add(key)
@@ -611,36 +613,21 @@ def main(
     else:
         console.print()
         confirmed = 0
-        for (
-            name,
-            start,
-            end,
-            _dur,
-            _pcol,
-            email,
-            _phone,
-            _guests,
-            _r,
-            _prop,
-            _prov,
-            _start,
-            _end,
-            rec,
-            eligible,
-            _past_checkin,
-        ) in rows:
-            if email == "none":
+        for row in rows:
+            if not row.email:
                 continue
-            if not eligible:
+            if not row.eligible:
                 continue
-            key = _sent_key(rec, _prop)
+            key = _sent_key(row.recipient, row.prop)
             if key in sent_keys:
                 continue
-            date_str = f" ({start} → {end})" if start else ""
-            prop_str = f" at {_prop}" if _prop else ""
-            if click.confirm(f"Send to {name} ({email}){prop_str}{date_str}?", default=False):
+            date_str = f" ({row.start_str} → {row.end_str})" if row.start_str else ""
+            prop_str = f" at {row.prop}" if row.prop else ""
+            if click.confirm(
+                f"Send to {row.display_name} ({row.email}){prop_str}{date_str}?", default=False
+            ):
                 if not dry_run:
-                    if not _do_send(cfg.smtp, _r, email):
+                    if not _do_send(cfg.smtp, row.result, row.email):
                         continue
                     _append_sent_log(SENT_LOG_PATH, key)
                     sent_keys.add(key)

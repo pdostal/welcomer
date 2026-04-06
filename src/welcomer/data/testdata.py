@@ -1,8 +1,8 @@
 """Bundled test data for --test-config mode.
 
 All dates are computed relative to today so the data never goes stale.
-One reservation (Radka Horáčková at The Snoring Goat) is pre-seeded as already
-sent, and Biscuit Château always has an overlap between SnoozePal and NapHub.
+One reservation (Radka Horáčková at Chalupa U Lesa) is pre-seeded as already
+sent, and Horský Apartmán always has an overlap between HousePal and StayBook.
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ _RADKA_START = 50  # pre-seeded as already sent
 _RADKA_END = 59
 _ANNA_START = 60
 _ANNA_END = 69
-_NAPUB_OVERLAP_START = 65  # overlaps with Anna (60–69) at Biscuit Château
-_NAPUB_OVERLAP_END = 74
-_TOMAS_START = 10  # same guest at two properties through SnoozePal → merges to Multi
+_BOOKING_OVERLAP_START = 65  # overlaps with Anna (60–69) at Horský Apartmán
+_BOOKING_OVERLAP_END = 74
+_TOMAS_START = 10  # same guest at two properties through HousePal → merges to Multi
 _TOMAS_END = 17
 _TIPSY_1_START = 80
 _TIPSY_1_END = 87
@@ -62,7 +62,7 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
     t = date.today()
     return [
         (
-            CalendarConfig(name="Biscuit Château", provider="SnoozePal", url=""),
+            CalendarConfig(name="Horský Apartmán", provider="HousePal", url=""),
             [
                 Recipient(
                     name="Tomáš Procházka",
@@ -88,7 +88,7 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
             ],
         ),
         (
-            CalendarConfig(name="Biscuit Château", provider="NapHub", url=""),
+            CalendarConfig(name="Horský Apartmán", provider="StayBook", url=""),
             [
                 Recipient(
                     name="CLOSED - Not available",
@@ -99,13 +99,13 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
                 Recipient(
                     name="CLOSED - Not available",
                     email=None,
-                    start=t + timedelta(days=_NAPUB_OVERLAP_START),
-                    end=t + timedelta(days=_NAPUB_OVERLAP_END),
+                    start=t + timedelta(days=_BOOKING_OVERLAP_START),
+                    end=t + timedelta(days=_BOOKING_OVERLAP_END),
                 ),
             ],
         ),
         (
-            CalendarConfig(name="The Snoring Goat", provider="SnoozePal", url=""),
+            CalendarConfig(name="Chalupa U Lesa", provider="HousePal", url=""),
             [
                 Recipient(
                     name="Klára Novotná",
@@ -138,7 +138,7 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
             ],
         ),
         (
-            CalendarConfig(name="The Tipsy Gnome", provider="NapHub", url=""),
+            CalendarConfig(name="Apartmán Sluneční", provider="StayBook", url=""),
             [
                 Recipient(
                     name="CLOSED - Not available",
@@ -162,4 +162,4 @@ def get_pre_sent_key() -> str:
     t = date.today()
     start = t + timedelta(days=_RADKA_START)
     end = t + timedelta(days=_RADKA_END)
-    return f"The Snoring Goat|{start}|{end}|Radka Horáčková|radka.horac@post.cz"
+    return f"Chalupa U Lesa|{start}|{end}|Radka Horáčková|radka.horac@post.cz"

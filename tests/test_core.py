@@ -96,3 +96,18 @@ def test_build_welcomes_result_fields():
     assert result.email == "alice@example.com"
     assert result.subject == "Hello Alice"
     assert result.body == "Welcome alice@example.com"
+
+
+def test_render_adults_and_kids():
+    r = make_recipient(adults=2, kids=1)
+    assert _render("Guests: {adults} adults, {kids} kids", r) == "Guests: 2 adults, 1 kids"
+
+
+def test_render_adults_missing_renders_empty():
+    r = make_recipient()  # adults=None, kids=None by default
+    assert _render("a:{adults} k:{kids}", r) == "a: k:"
+
+
+def test_render_property_and_provider():
+    r = make_recipient(extra={"property": "Horský Apartmán", "provider": "HousePal"})
+    assert _render("{property} via {provider}", r) == "Horský Apartmán via HousePal"

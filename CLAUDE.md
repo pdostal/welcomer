@@ -147,11 +147,11 @@ never sent, the status cell is empty.
 - `tests/fixtures/cal.ics` — real e-chalupy.cz reservation calendar (2 guests, used in ical tests)
 - `src/welcomer/data/cal.ics` — same file, packaged as resource (kept in sync with tests/fixtures)
 - `src/welcomer/data/testdata.py` — programmatic test data for `--test-config`; dates are always
-  relative to `date.today()` so they never go stale. Four properties (Biscuit Château/SnoozePal,
-  Biscuit Château/NapHub, The Snoring Goat/SnoozePal, The Tipsy Gnome/NapHub) with 9 events total.
-  Biscuit Château always has an overlap between SnoozePal and NapHub. Tomáš Procházka appears on two
-  properties via the same provider and merges into a "Multi" entry. Klára Novotná is always
-  in-progress (checked in 3 days ago). Radka Horáčková is pre-seeded as already sent. Exposes
+  relative to `date.today()` so they never go stale. Four properties (Horský Apartmán/HousePal,
+  Horský Apartmán/StayBook, Chalupa U Lesa/HousePal, Apartmán Sluneční/StayBook) with 9 events
+  total. Horský Apartmán always has an overlap between HousePal and StayBook. Tomáš Procházka
+  appears on two properties via the same provider and merges into a "Multi" entry. Klára Novotná is
+  always in-progress (checked in 3 days ago). Radka Horáčková is pre-seeded as already sent. Exposes
   `get_test_calendars()`, `get_pre_sent_key()`, and `TEST_CONFIG`.
 
 When updating any fixture, copy to both `tests/fixtures/` and `src/welcomer/data/`.

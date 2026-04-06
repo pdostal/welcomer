@@ -169,9 +169,9 @@ def test_test_config_requires_dry_run():
 
 
 def test_property_filter():
-    # NapHub (Tipsy Gnome) has real reservations but no contact info — shown with "none"
+    # StayBook (Apartmán Sluneční) has only CLOSED entries — no email, nothing sent
     runner = CliRunner()
-    result = runner.invoke(main, ["--dry-run", "--test-config", "--property", "Tipsy Gnome"])
+    result = runner.invoke(main, ["--dry-run", "--test-config", "--property", "Apartmán Sluneční"])
     assert result.exit_code == 0
     assert "Reservation" in result.output
     assert "Would send 0" in result.output
@@ -179,7 +179,7 @@ def test_property_filter():
 
 def test_property_filter_case_insensitive():
     runner = CliRunner()
-    result = runner.invoke(main, ["--dry-run", "--test-config", "--property", "tipsy gnome"])
+    result = runner.invoke(main, ["--dry-run", "--test-config", "--property", "apartmán sluneční"])
     assert result.exit_code == 0
     assert "Reservation" in result.output
     assert "Would send 0" in result.output
@@ -194,31 +194,29 @@ def test_property_filter_no_match():
 
 def test_provider_filter():
     runner = CliRunner()
-    result = runner.invoke(main, ["--dry-run", "--test-config", "--provider", "SnoozePal"])
+    result = runner.invoke(main, ["--dry-run", "--test-config", "--provider", "HousePal"])
     assert result.exit_code == 0
     assert "Anna" in result.output
     assert "Radka" in result.output
-    assert "Martina" not in result.output
 
 
 def test_provider_filter_case_insensitive():
     runner = CliRunner()
-    result = runner.invoke(main, ["--dry-run", "--test-config", "--provider", "snoozepal"])
+    result = runner.invoke(main, ["--dry-run", "--test-config", "--provider", "housepal"])
     assert result.exit_code == 0
     assert "Anna" in result.output
-    assert "Martina" not in result.output
+    assert "Radka" in result.output
 
 
 def test_property_and_provider_filter_combined():
     runner = CliRunner()
     result = runner.invoke(
         main,
-        ["--dry-run", "--test-config", "--property", "Château", "--provider", "SnoozePal"],
+        ["--dry-run", "--test-config", "--property", "Horský", "--provider", "HousePal"],
     )
     assert result.exit_code == 0
     assert "Anna" in result.output
     assert "Radka" not in result.output
-    assert "Martina" not in result.output
 
 
 def _mock_today(d: date):
@@ -252,7 +250,7 @@ def test_days_filter_includes_upcoming():
 
 
 def test_days_filter_not_active_by_default():
-    # SnoozePal guests: Klára, Tomáš (Multi), Anna, Pavel, Radka, Jiří = 6 total.
+    # HousePal guests: Klára, Tomáš (Multi), Anna, Pavel, Radka, Jiří = 6 total.
     # Tomáš appears at two properties but merges into one Multi entry.
     runner = CliRunner()
     result = runner.invoke(main, ["--dry-run", "--test-config"])
@@ -518,7 +516,7 @@ def test_multi_property_three_properties_merged(tmp_path):
 
 
 def test_multi_property_test_config_shows_tomas():
-    """Tomáš appears in two SnoozePal calendars and is shown as a single Multi entry."""
+    """Tomáš appears in two HousePal calendars and is shown as a single Multi entry."""
     runner = CliRunner()
     result = runner.invoke(main, ["--dry-run", "--test-config"])
     assert result.exit_code == 0
@@ -594,10 +592,10 @@ def test_name_color_none_dates_is_green():
 
 
 def test_days_filter_combined_with_property():
-    # --property Snoring: Radka (today+50) within 100 days, Jiří (today+150) not
+    # --property Lesa: Radka (today+50) within 100 days, Jiří (today+150) not
     runner = CliRunner()
     result = runner.invoke(
-        main, ["--dry-run", "--test-config", "--days", "100", "--property", "Snoring"]
+        main, ["--dry-run", "--test-config", "--days", "100", "--property", "Lesa"]
     )
     assert result.exit_code == 0
     assert "Radka" in result.output
@@ -682,26 +680,26 @@ def test_version():
 
 
 # ---------------------------------------------------------------------------
-# NapHub (Biscuit Château) filter
+# StayBook (Horský Apartmán) filter
 # ---------------------------------------------------------------------------
 
 
-def test_biscuit_chateau_napHub_filter():
-    # NapHub has real reservations but no contact info — shown with "none", nothing sent
+def test_horsky_apartman_booking_filter():
+    # StayBook entries are CLOSED — no email, nothing sent
     runner = CliRunner()
     result = runner.invoke(
         main,
-        ["--dry-run", "--test-config", "--property", "Château", "--provider", "NapHub"],
+        ["--dry-run", "--test-config", "--property", "Horský", "--provider", "StayBook"],
     )
     assert result.exit_code == 0
     assert "Reservation" in result.output
     assert "Would send 0" in result.output
 
 
-def test_napHub_provider_no_guests_to_send():
-    # NapHub has real reservations but no contact info — shown in table, nothing sent
+def test_booking_provider_no_guests_to_send():
+    # StayBook entries are CLOSED — shown in table, nothing sent
     runner = CliRunner()
-    result = runner.invoke(main, ["--dry-run", "--test-config", "--provider", "NapHub"])
+    result = runner.invoke(main, ["--dry-run", "--test-config", "--provider", "StayBook"])
     assert result.exit_code == 0
     assert "Reservation" in result.output
     assert "Would send 0" in result.output
@@ -722,13 +720,12 @@ def test_closed_events_shown_but_not_sent():
 
 
 def test_overlap_detected_in_test_config():
-    # NapHub Reservation (Jun 7–15) overlaps Anna Dvořáková/SnoozePal (Jun 1–10)
-    # at Biscuit Château — overlapping Jun 7–10
+    # StayBook Reservation overlaps Anna Dvořáková/HousePal at Horský Apartmán
     runner = CliRunner()
     result = runner.invoke(main, ["--dry-run", "--test-config"])
     assert result.exit_code == 0
     assert "Overlap" in result.output
-    assert "Biscuit Château" in result.output
+    assert "Horský Apartmán" in result.output
     assert "Reservation" in result.output
     assert "Anna" in result.output
 
@@ -736,8 +733,8 @@ def test_overlap_detected_in_test_config():
 def test_overlap_shows_both_providers():
     runner = CliRunner()
     result = runner.invoke(main, ["--dry-run", "--test-config"])
-    assert "NapHub" in result.output
-    assert "SnoozePal" in result.output
+    assert "StayBook" in result.output
+    assert "HousePal" in result.output
 
 
 def test_no_overlap_when_non_overlapping(tmp_path):
@@ -1291,22 +1288,19 @@ def test_sent_marker_checkmark_when_in_log(tmp_path, mock_sent_log):
 def test_calendar_loading_grouped_by_property():
     """Calendars with the same property name are loaded consecutively.
 
-    Original order: Tipsy Gnome, Biscuit Château/SnoozePal, Snoring Goat, Biscuit Château/NapHub
-    After stable sort by name: Biscuit Château x2 → Snoring Goat → Tipsy Gnome
+    Alphabetical sort: Apartmán Sluneční → Chalupa U Lesa → Horský Apartmán x2
     """
     runner = CliRunner()
     result = runner.invoke(main, ["--dry-run", "--test-config"])
     assert result.exit_code == 0
     out = result.output
-    # Both Biscuit Château entries appear before The Snoring Goat and The Tipsy Gnome
-    idx_bc1 = out.index("Biscuit Château · SnoozePal")
-    idx_bc2 = out.index("Biscuit Château · NapHub")
-    idx_goat = out.index("The Snoring Goat")
-    idx_gnome = out.index("The Tipsy Gnome")
-    assert idx_bc1 < idx_goat
-    assert idx_bc2 < idx_goat
-    assert idx_bc1 < idx_gnome
-    assert idx_bc2 < idx_gnome
+    idx_ha_housepal = out.index("Horský Apartmán · HousePal")
+    idx_ha_staybook = out.index("Horský Apartmán · StayBook")
+    idx_lesa = out.index("Chalupa U Lesa")
+    idx_slunecni = out.index("Apartmán Sluneční")
+    # Alphabetical: Apartmán < Chalupa < Horský (both Horský entries load last, together)
+    assert idx_slunecni < idx_lesa < idx_ha_housepal
+    assert idx_slunecni < idx_lesa < idx_ha_staybook
 
 
 def test_calendar_loading_grouped_by_property_with_mocked_calendars(tmp_path):
@@ -1671,3 +1665,60 @@ def test_overlap_warning_shown_outside_days_window(tmp_path):
         result = runner.invoke(main, ["--config", str(p), "--dry-run", "--days", "1"])
     assert result.exit_code == 0
     assert "⚠ Overlap" in result.output
+
+
+# ---------------------------------------------------------------------------
+# --advance edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_advance_zero_makes_checkin_today_eligible(tmp_path):
+    """With --advance 0, only a reservation starting today is eligible."""
+    today = date.today()
+    rec = Recipient(name="Alice", email="a@x.com", start=today, end=today + timedelta(days=3))
+    result = _run_with_calendars(tmp_path, [("Villa", "P", [rec])], extra_args=["--advance", "0"])
+    assert "●" in result.output
+
+
+def test_advance_zero_tomorrow_not_eligible(tmp_path):
+    """With --advance 0, a reservation starting tomorrow is not yet eligible."""
+    today = date.today()
+    rec = Recipient(
+        name="Bob", email="b@x.com", start=today + timedelta(days=1), end=today + timedelta(days=5)
+    )
+    result = _run_with_calendars(tmp_path, [("Villa", "P", [rec])], extra_args=["--advance", "0"])
+    assert "○" in result.output
+
+
+def test_advance_one_includes_tomorrow(tmp_path):
+    """With --advance 1, a reservation starting tomorrow is eligible."""
+    today = date.today()
+    rec = Recipient(
+        name="Carol",
+        email="c@x.com",
+        start=today + timedelta(days=1),
+        end=today + timedelta(days=5),
+    )
+    result = _run_with_calendars(tmp_path, [("Villa", "P", [rec])], extra_args=["--advance", "1"])
+    assert "●" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Empty email / phone display
+# ---------------------------------------------------------------------------
+
+
+def test_no_email_displays_empty_not_none(tmp_path):
+    """A recipient with no email shows an empty string, not 'none', in the output."""
+    rec = Recipient(name="NoEmail", email=None)
+    result = _run_with_calendars(tmp_path, [("Villa", "P", [rec])])
+    assert result.exit_code == 0
+    assert "none" not in result.output.lower().split()
+
+
+def test_no_phone_displays_empty_not_none(tmp_path):
+    """A recipient with no phone shows an empty string, not 'none', in the output."""
+    rec = Recipient(name="NoPhone", email="np@x.com", phone="")
+    result = _run_with_calendars(tmp_path, [("Villa", "P", [rec])])
+    assert result.exit_code == 0
+    assert "none" not in result.output.lower().split()
