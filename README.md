@@ -1,5 +1,7 @@
 # welcomer
 
+![logo](logo.svg)
+
 Sends configurable welcome emails to guests loaded from iCal calendar URLs. Built for accommodation
 businesses — reads reservations from a calendar and emails each guest a personalised welcome
 message.
