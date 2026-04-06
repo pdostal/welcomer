@@ -83,8 +83,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   default)
 - **`date_format` config field** — strftime format string for date display (default `%Y-%m-%d`);
   test config uses `%d. %m. %Y`
-- **Aligned tabular output** — columns (Name, From, To, Duration, Calendar, E-mail, Phone) with
-  emoji headers; sorted by start date → end date → property → provider
+- **Aligned tabular output** — columns (Name, From, To, Duration, Calendar, email, Phone) with emoji
+  headers; sorted by start date → end date → property → provider
 - **Path support in calendar `url`** — accepts absolute and relative file paths in addition to
   HTTP(S) URLs; relative paths resolve against the config file's directory
 - **Expanded test suite** — sort order, sort tiebreakers, filter edge cases, `--days` with mocked
@@ -108,7 +108,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`--test-calendar` flag** — preview output using the bundled sample calendar (requires
   `--dry-run`)
 - **OCI container** — image published to `ghcr.io/pdostal/welcomer`; `latest` on every master push,
-  `X.Y.Z` and `X.Y` semver tags on releases
+  `X.Y.Z` and `X.Y` SemVer tags on releases
 - **Expanded test suite** — unit tests for `_to_date`, `_parse_email`, `_extract_cn`,
   `fetch_recipients`, and fixture-based tests against a real e-chalupy.cz calendar file
 

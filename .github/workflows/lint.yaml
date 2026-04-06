@@ -38,3 +38,5 @@ jobs:
         env:
           # To report GitHub Actions status checks
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # unpinned-uses requires SHA pinning; Dependabot handles version tracking
+          VALIDATE_GITHUB_ACTIONS_ZIZMOR: false

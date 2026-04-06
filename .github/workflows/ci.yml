@@ -5,6 +5,8 @@ on:
     branches: [master]
   pull_request:
 
+permissions: {}
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -16,6 +18,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -24,21 +28,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
-      - name: ruff
-        run: uv run ruff check .
-
-      - name: black
-        run: uv run black --check .
-
       - name: taplo
         run: |
           curl -fsSL https://github.com/tamasfe/taplo/releases/latest/download/taplo-linux-x86_64.gz \
             | gzip -d | install -m 755 /dev/stdin /usr/local/bin/taplo
           taplo fmt --check
-
-      - name: yamllint
-        run: |
-          uv run --with yamllint yamllint .
 
       - name: mdformat
         run: uv run mdformat --check --exclude ".venv/**" --exclude ".pytest_cache/**" .
@@ -50,6 +44,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -68,6 +64,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@v7
         with:
