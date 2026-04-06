@@ -326,7 +326,7 @@ def test_days_filter_boundary_inclusive():
 
 
 def test_days_filter_excludes_past(tmp_path):
-    # Reservations that have fully ended (end < today) are excluded
+    # Reservations that have fully ended (end < today) are excluded even with --days
     today = date.today()
     recs = [
         Recipient(
@@ -345,6 +345,43 @@ def test_days_filter_excludes_past(tmp_path):
     result = _run_with_calendars(tmp_path, [("Cal", "P", recs)], extra_args=["--days", "30"])
     assert "FutureGuest" in result.output
     assert "PastGuest" not in result.output
+
+
+def test_ended_reservations_always_hidden_without_days_filter(tmp_path):
+    """Reservations that ended before today are hidden even without --days."""
+    today = date.today()
+    recs = [
+        Recipient(
+            name="Ended",
+            email="e@x.com",
+            start=today - timedelta(days=20),
+            end=today - timedelta(days=1),
+        ),
+        Recipient(
+            name="Active",
+            email="a@x.com",
+            start=today - timedelta(days=3),
+            end=today + timedelta(days=2),
+        ),
+    ]
+    result = _run_with_calendars(tmp_path, [("Villa", "P", recs)])
+    table = result.output[result.output.index("👤 Name") :]
+    assert "Active" in table
+    assert "Ended" not in table
+
+
+def test_checkout_today_shown_without_days_filter(tmp_path):
+    """A reservation checking out today is visible even without --days."""
+    today = date.today()
+    rec = Recipient(
+        name="CheckoutToday",
+        email="c@x.com",
+        start=today - timedelta(days=5),
+        end=today,
+    )
+    result = _run_with_calendars(tmp_path, [("Villa", "P", [rec])])
+    table = result.output[result.output.index("👤 Name") :]
+    assert "CheckoutToday" in table
 
 
 def test_days_filter_includes_in_progress(tmp_path):

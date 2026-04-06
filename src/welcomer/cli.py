@@ -473,13 +473,15 @@ def main(
     # so warnings appear even when overlapping reservations fall outside --days.
     overlaps = _detect_overlaps(recipients)
 
+    # Always hide reservations that ended before today (checkout yesterday or earlier).
+    # Reservations with no end date are kept. Checkout-today (end == today) is kept.
+    recipients = [rec for rec in recipients if rec.end is None or rec.end >= today]
+
     effective_days = days if days is not None else cfg.days
     if effective_days is not None:
         cutoff = today + timedelta(days=effective_days)
         recipients = [
-            rec
-            for rec in recipients
-            if rec.start and rec.start <= cutoff and rec.end is not None and rec.end >= today
+            rec for rec in recipients if rec.start and rec.start <= cutoff and rec.end is not None
         ]
 
     effective_advance = advance if advance is not None else cfg.advance
