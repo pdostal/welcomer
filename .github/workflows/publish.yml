@@ -63,3 +63,33 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body_path: /tmp/release-notes.txt
+
+  pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: release
+    # Trusted publishing (OIDC) — no API token needed.
+    # One-time setup at https://pypi.org/manage/account/publishing/:
+    #   PyPI project name : welcomer
+    #   GitHub owner      : pdostal
+    #   GitHub repo       : welcomer
+    #   Workflow filename : publish.yml
+    #   Environment name  : pypi
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Build
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
