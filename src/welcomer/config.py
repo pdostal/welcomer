@@ -11,7 +11,8 @@ from typing import Any
 @dataclass
 class CalendarConfig:
     url: str
-    name: str = ""
+    property: str = ""  # accommodation/property name
+    official_name: str = ""  # official/legal property name for templates
     provider: str = ""
 
 
@@ -20,6 +21,9 @@ class SmtpConfig:
     host: str = "localhost"
     port: int = 1025
     from_addr: str = ""
+    from_name: str = ""  # display name — formatted as "from_name <from_addr>"
+    cc: list[str] = field(default_factory=list)
+    bcc: list[str] = field(default_factory=list)
     username: str = ""
     password: str = ""
     tls: bool = False
@@ -27,10 +31,20 @@ class SmtpConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SmtpConfig:
+        def _as_list(val: Any) -> list[str]:
+            if val is None:
+                return []
+            if isinstance(val, str):
+                return [val]
+            return list(val)
+
         return cls(
             host=data.get("host", "localhost"),
             port=data.get("port", 1025),
             from_addr=data.get("from", ""),
+            from_name=data.get("from_name", ""),
+            cc=_as_list(data.get("cc")),
+            bcc=_as_list(data.get("bcc")),
             username=data.get("username", ""),
             password=data.get("password", ""),
             tls=data.get("tls", False),
@@ -45,6 +59,7 @@ class WelcomerConfig:
     date_format: str = "%Y-%m-%d"
     days: int | None = None
     advance: int = 14
+    send_without_email: bool = False
     smtp: SmtpConfig | None = None
     calendars: list[CalendarConfig] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
@@ -58,7 +73,13 @@ class WelcomerConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> WelcomerConfig:
         calendars = [
-            CalendarConfig(url=c["url"], name=c.get("name", ""), provider=c.get("provider", ""))
+            CalendarConfig(
+                url=c["url"],
+                # Accept "property" key; fall back to "name" for backward compat
+                property=c.get("property", c.get("name", "")),
+                official_name=c.get("official_name", ""),
+                provider=c.get("provider", ""),
+            )
             for c in data.get("calendars", [])
         ]
         smtp_data = data.get("smtp")
@@ -68,6 +89,7 @@ class WelcomerConfig:
             date_format=data.get("date_format", "%Y-%m-%d"),
             days=data.get("days"),
             advance=data.get("advance", 14),
+            send_without_email=data.get("send_without_email", False),
             smtp=SmtpConfig.from_dict(smtp_data) if smtp_data is not None else None,
             calendars=calendars,
             raw=data,

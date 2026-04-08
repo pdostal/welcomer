@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-04-08
+
+### Added
+
+- **Jinja2 templates** — subject and body now use Jinja2 syntax (`{{ variable }}`,
+  `{% if %}...{% endif %}`, filters); conditionals, filters, and the `or` shorthand are all
+  supported; unknown variables silently render as empty string
+- **`official_name` template variable** — legal/official property name; falls back to `property`
+  when not set; multi-property reservations get a comma-separated list
+- **`from_name` SMTP option** — sets the display name in the `From` header
+  (`"My Property <info@example.com>"`)
+- **`cc` and `bcc` SMTP options** — CC is added to message headers; BCC is included in the SMTP
+  envelope only (not visible to recipients); both accept a list or a single string
+- **`send_without_email` config flag** — when `true`, reservations without a guest email still show
+  `○`/`●` and are sent to CC/BCC recipients only
+- **Interactive prompting for missing contact data** — in interactive mode the app asks for email
+  and phone before rendering the template, so they can be used as template variables
+- **`official_name` calendar field** — add `official_name = "..."` to any `[[calendars]]` entry
+
+### Changed
+
+- `CalendarConfig.name` renamed to `CalendarConfig.property` for consistency; `name =` in TOML is
+  still accepted (backward compat)
+- Column header "🏡 Calendar" → "🏡 Property"
+- Template syntax changed from Python `str.format_map` (`{name}`) to Jinja2 (`{{ name }}`);
+  **existing configs must be updated**
+
 ## [0.4.1] - 2026-04-06
 
 ### Added

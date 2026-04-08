@@ -50,7 +50,8 @@ subject + markdown body per recipient, and prints the result.
 Data flows through three layers:
 
 1. **`config.py`** — loads `config.toml` (TOML) into `WelcomerConfig`, which holds `subject`, `body`
-   (markdown template), `days` (optional filter), and a list of `CalendarConfig` (url + name).
+   (markdown template), `days` (optional filter), `send_without_email` (bool), and a list of
+   `CalendarConfig` (url + property + official_name + provider).
 
 1. **`ical.py`** — fetches each calendar URL with `httpx`, parses with `icalendar`, and returns
    `Recipient` objects (name, email, phone, start, end, extra). Extracts from `ATTENDEE` entries;
@@ -65,11 +66,17 @@ Data flows through three layers:
 
 1. **`smtp.py`** — email sending via stdlib `smtplib`. Single function
    `send_email(cfg, to, subject, body)`. Supports plain SMTP, STARTTLS (`tls=true`), and SSL
-   (`ssl=true`). Authenticates only when `cfg.username` is set. Body is sent as plain text (the
-   rendered markdown template).
+   (`ssl=true`). Authenticates only when `cfg.username` is set. Formats `From` as
+   `"from_name <from_addr>"` when `from_name` is set. Adds CC header when `cfg.cc` is set; BCC
+   addresses are included in the SMTP envelope only (not in message headers). When `to` is empty
+   (send_without_email mode), sends to CC/BCC only; skips send entirely if no recipients. Body is
+   sent as plain text (the rendered markdown template).
 
-1. **`core.py`** — calls `_render()` to interpolate `{name}`, `{email}`, `{phone}`, `{start}`,
-   `{end}`, `{summary}` into `subject`/`body`, producing `WelcomeResult` objects.
+1. **`core.py`** — calls `_render()` to render Jinja2 templates with guest context variables
+   (`name`, `email`, `phone`, `start`, `end`, `adults`, `kids`, `property`, `official_name`,
+   `provider`, `summary`) into `subject`/`body`, producing `WelcomeResult` objects. Uses a shared
+   `jinja2.Environment` with `autoescape=False` and `undefined=jinja2.Undefined` (unknown variables
+   silently render as empty string).
 
 **`cli.py`** wires it all together via Click. Default output: one compact line per recipient (name,
 dates, email, phone, sent status). Add `--print-note` to also render the subject and markdown body.
@@ -83,10 +90,14 @@ Config is loaded from the first path that exists, in priority order:
 1. `~/.config/welcomer/config.toml`
 
 Both paths are excluded from git. Create one of these files (see README.md for an example). Keys:
-`subject`, `body` (multiline TOML string, markdown), `days` (optional int), `[[calendars]]` array
-with `url` and `name`.
+`subject`, `body` (multiline TOML string, markdown), `days` (optional int), `send_without_email`
+(bool, default false), `[[calendars]]` array with `url`, `property` (accommodation name; `name` is
+also accepted for backward compat), `official_name` (optional legal name), and `provider`.
 
-Message template variables: `{name}`, `{email}`, `{phone}`, `{start}`, `{end}`, `{summary}`.
+Message templates use Jinja2 syntax (`{{ variable }}`, `{% if %}...{% endif %}`, filters). Available
+variables: `name`, `email`, `phone`, `start`, `end`, `adults`, `kids`, `property`, `official_name`
+(falls back to `property`), `provider`, `summary`. Unknown variables render as empty string. See
+README.md for the full variable table and Jinja2 usage examples.
 
 ## CLI flags
 
@@ -115,6 +126,9 @@ prints a warning on non-dry-run invocations.
 host = "smtp.example.com"
 port = 587
 from = "info@myproperty.com"
+from_name = "My Property"           # optional: display name in From header
+# cc = ["manager@myproperty.com"]  # optional: CC on every email (list or single string)
+# bcc = ["audit@myproperty.com"]   # optional: BCC (envelope only, not in headers)
 username = "info@myproperty.com"   # omit for unauthenticated relay
 password = "secret"
 tls = true    # STARTTLS (port 587)
@@ -135,8 +149,11 @@ The `Sent` column in the output table shows one of four states:
 
 | Symbol | Colour | Meaning | | ------ | ------ | ------- | | `✓` | green | Already sent (in
 sent.log) | | `●` | green | Eligible to send now (today ≤ check-in ≤ today + advance days) | | `○` |
-yellow | Not yet eligible (check-in too far in the future) | | (empty) | — | No email address, or
-check-in already passed and not yet sent |
+yellow | Not yet eligible (check-in too far in the future) | | (empty) | — | No email address
+(unless `send_without_email = true`), or check-in already passed and not yet sent |
+
+When `send_without_email = true`, reservations without a guest email show `○`/`●` and are sent to
+CC/BCC recipients only (requires CC or BCC configured in `[smtp]`).
 
 Emails are never sent to reservations whose check-in date is in the past — those guests have either
 already arrived or departed. If a welcome was sent before check-in, the row shows `✓`; if it was

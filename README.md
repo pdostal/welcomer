@@ -55,7 +55,7 @@ Config is loaded from the first path that exists:
 Example config:
 
 ```toml
-subject = "Reservation confirmed – {name}"
+subject = "Reservation confirmed – {{ name }}"
 
 # Only show reservations starting within this many days from today (optional)
 # days = 30
@@ -63,30 +63,73 @@ subject = "Reservation confirmed – {name}"
 # Days before check-in when a reservation becomes eligible to send (default: 14)
 # advance = 14
 
-body = """
-Dear {name},
+# Send to CC/BCC even when the guest email is unknown (default: false)
+# send_without_email = false
 
-Thank you for your reservation from {start} to {end}.
-We look forward to hosting you ({adults} adults, {kids} kids).
+body = """
+Dear {{ name }},
+
+Thank you for your reservation from {{ start }} to {{ end }} at {{ official_name }}.
+{% if adults %}We look forward to hosting you ({{ adults }} adults{% if kids %}, {{ kids }} kids{% endif %}).
+{% endif %}
+If you have any questions, reply to this email.
 """
 
 [smtp]
 host = "smtp.example.com"
 port = 587
 from = "info@myproperty.com"
+from_name = "My Property"          # optional: sets the From display name
+# cc = ["manager@myproperty.com"] # optional: CC every outgoing email
+# bcc = ["audit@myproperty.com"]  # optional: BCC (not shown in headers)
 username = "info@myproperty.com"
 password = "secret"
 tls = true      # use STARTTLS (port 587)
 # ssl = true    # use SSL/TLS instead (port 465)
 
 [[calendars]]
-name = "My Property"
+property = "My Property"
+official_name = "My Property s.r.o."  # optional: legal/official name for templates
 provider = "BookingProvider"
 url = "https://example.com/calendar.ics"
 ```
 
-Template variables: `{name}`, `{email}`, `{phone}`, `{start}`, `{end}`, `{summary}`, `{adults}`,
-`{kids}`.
+**Backward compatibility:** the `name` key in `[[calendars]]` is still accepted and maps to
+`property`. Existing configs do not need to be updated.
+
+### Template variables
+
+Templates use [Jinja2](https://jinja.palletsprojects.com/) syntax: `{{ variable }}`,
+`{% if condition %}...{% endif %}`, filters (`| upper`, `| default('fallback', true)`).
+
+| Variable | Description | Empty when | | -------------- |
+-------------------------------------------- | -------------------------- | | `name` | Guest name |
+— | | `email` | Guest email address | no email on reservation | | `phone` | Guest phone number | no
+phone on reservation | | `start` | Check-in date (formatted per `date_format`) | — | | `end` |
+Check-out date (formatted per `date_format`) | — | | `adults` | Number of adult guests | not
+provided by calendar | | `kids` | Number of child guests | not provided by calendar | | `property` |
+Property name (from `[[calendars]]`) | not configured | | `official_name` | Legal/official property
+name | falls back to `property` | | `provider` | Booking provider name | not configured | |
+`summary` | Raw iCal event summary | — |
+
+**Jinja2 examples:**
+
+```jinja
+{# Conditional block #}
+{% if phone %}We can be reached at {{ phone }}.{% endif %}
+
+{# Fallback value #}
+{{ phone | default('contact us by email', true) }}
+
+{# Inline conditional #}
+{{ phone if phone else 'reply to this email' }}
+
+{# Both adults and kids with nested condition #}
+{% if adults %}{{ adults }} adults{% if kids %}, {{ kids }} kids{% endif %}{% endif %}
+
+{# Upper-case filter #}
+{{ name | upper }}
+```
 
 ## Local SMTP testing with Mailpit
 
@@ -128,8 +171,11 @@ The `Sent` column shows the status of each reservation:
 
 | Symbol | Colour | Meaning | | ------ | ------ | ------- | | `✓` | green | Already sent (in
 sent.log) | | `●` | green | Eligible to send now (check-in within advance window) | | `○` | yellow |
-Not yet eligible (check-in too far away) | | (empty) | — | No email address, or check-in already
-passed and not yet sent |
+Not yet eligible (check-in too far away) | | (empty) | — | No email address (unless
+`send_without_email = true`), or check-in already passed and not yet sent |
+
+When `send_without_email = true`, reservations without a guest email still show `○`/`●` and will be
+sent to CC/BCC recipients only. Requires CC or BCC to be configured in `[smtp]`.
 
 ## Calendar cache
 

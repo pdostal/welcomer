@@ -35,23 +35,24 @@ _JIRI_START = 150
 _JIRI_END = 159
 
 TEST_CONFIG = WelcomerConfig(
-    subject="Welcome to {property}, {name}!",
+    subject="Welcome to {{ property }}, {{ name }}!",
     date_format="%d. %m. %Y",
     body="""\
-Dear {name},
+Dear {{ name }},
 
-Great news — your stay at **{property}** is locked in! 🎉
+Great news — your stay at **{{ property }}** is locked in! 🎉
 
-You'll be arriving on **{start}** and checking out on **{end}**.
+You'll be arriving on **{{ start }}** and checking out on **{{ end }}**.
 We'll have the place ready, the kettle on, and a moderately
 enthusiastic welcome waiting for you.
 
-Got questions before you arrive? We're reachable by email or phone.
+{% if official_name != property %}{{ official_name }}{% endif %}
+Got questions before you arrive? We're reachable by email.
 We promise to reply before your check-in date. Probably.
 
 See you soon — try not to lose your keys on the way,
 
-The {property} team
+The {{ property }} team
 """,
     advance=14,
 )
@@ -62,7 +63,12 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
     t = date.today()
     return [
         (
-            CalendarConfig(name="Horský Apartmán", provider="HousePal", url=""),
+            CalendarConfig(
+                property="Horský Apartmán",
+                official_name="Horský Apartmán s.r.o.",
+                provider="HousePal",
+                url="",
+            ),
             [
                 Recipient(
                     name="Tomáš Procházka",
@@ -88,7 +94,12 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
             ],
         ),
         (
-            CalendarConfig(name="Horský Apartmán", provider="StayBook", url=""),
+            CalendarConfig(
+                property="Horský Apartmán",
+                official_name="Horský Apartmán s.r.o.",
+                provider="StayBook",
+                url="",
+            ),
             [
                 Recipient(
                     name="CLOSED - Not available",
@@ -105,7 +116,12 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
             ],
         ),
         (
-            CalendarConfig(name="Chalupa U Lesa", provider="HousePal", url=""),
+            CalendarConfig(
+                property="Chalupa U Lesa",
+                official_name="Chalupa U Lesa - J. Novák",
+                provider="HousePal",
+                url="",
+            ),
             [
                 Recipient(
                     name="Klára Novotná",
@@ -138,7 +154,12 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
             ],
         ),
         (
-            CalendarConfig(name="Apartmán Sluneční", provider="StayBook", url=""),
+            CalendarConfig(
+                property="Apartmán Sluneční",
+                official_name="",
+                provider="StayBook",
+                url="",
+            ),
             [
                 Recipient(
                     name="CLOSED - Not available",

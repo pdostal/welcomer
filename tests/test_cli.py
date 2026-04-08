@@ -15,7 +15,7 @@ def _run_with_calendars(tmp_path, calendars, extra_args=()):
     Helper for sort/filter tests. calendars is a list of (name, provider, [Recipient]).
     Creates a minimal config and mocks fetch_recipients per URL.
     """
-    lines = ['subject = "Hi {name}"', 'body = "Hi"', ""]
+    lines = ['subject = "Hi {{ name }}"', 'body = "Hi"', ""]
     url_map = {}
     for i, (cal_name, provider, recs) in enumerate(calendars):
         url = f"https://example.com/{i}.ics"
@@ -41,8 +41,8 @@ def _run_with_calendars(tmp_path, calendars, extra_args=()):
 
 
 TOML_CONTENT = """\
-subject = "Welcome, {name}!"
-body = "Hi {name}, glad to have you."
+subject = "Welcome, {{ name }}!"
+body = "Hi {{ name }}, glad to have you."
 
 [[calendars]]
 name = "Test Cal"
@@ -250,12 +250,20 @@ def test_days_filter_includes_upcoming():
 
 
 def test_days_filter_not_active_by_default():
-    # HousePal guests: Klára, Tomáš (Multi), Anna, Pavel, Radka, Jiří = 6 total.
-    # Tomáš appears at two properties but merges into one Multi entry.
+    # Without --days all 6 unique guests appear: Klára, Tomáš (Multi), Anna, Pavel, Radka, Jiří.
+    # Only Tomáš is eligible within the 14-day advance window → Would send 1.
     runner = CliRunner()
     result = runner.invoke(main, ["--dry-run", "--test-config"])
     assert result.exit_code == 0
-    assert "Would send 6" in result.output
+    for name in (
+        "Klára Novotná",
+        "Tomáš Procházka",
+        "Anna Dvořáková",
+        "Pavel Kratochvíl",
+        "Jiří Svoboda",
+    ):
+        assert name in result.output
+    assert "Would send 1" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -682,7 +690,7 @@ def test_no_recipients_exits_zero(config_file):
 def test_multiple_calendars_partial_failure(tmp_path):
     p = tmp_path / "config.toml"
     p.write_text(
-        'subject = "Hi {name}"\nbody = "Hello {name}"\n\n'
+        'subject = "Hi {{ name }}"\nbody = "Hello {{ name }}"\n\n'
         '[[calendars]]\nname = "Good"\nurl = "https://example.com/good.ics"\n\n'
         '[[calendars]]\nname = "Bad"\nurl = "https://example.com/bad.ics"\n',
         encoding="utf-8",
@@ -743,12 +751,14 @@ def test_booking_provider_no_guests_to_send():
 
 
 def test_closed_events_shown_but_not_sent():
-    """CLOSED events from booking.com-style calendars appear in the table but are not sent."""
+    """CLOSED events appear in the table but are never eligible to send."""
     runner = CliRunner()
     result = runner.invoke(main, ["--dry-run", "--test-config"])
     assert result.exit_code == 0
+    # Reservation rows appear for CLOSED entries
     assert "CLOSED" in result.output
-    assert "Would send 6" in result.output
+    # CLOSED entries have no email so they don't count toward Would send
+    assert "Would send 1" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -971,7 +981,7 @@ def test_days_from_config(tmp_path):
     # days = 1 in config → only today+1 window; all test fixtures are far future → no recipients
     p = tmp_path / "config.toml"
     p.write_text(
-        'subject = "Hi {name}"\nbody = "Hi"\ndays = 1\n\n'
+        'subject = "Hi {{ name }}"\nbody = "Hi"\ndays = 1\n\n'
         '[[calendars]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\n',
         encoding="utf-8",
     )
@@ -987,7 +997,7 @@ def test_days_cli_overrides_config(tmp_path):
     # config has days = 1, CLI has --days 3650 → far-future recipient should appear
     p = tmp_path / "config.toml"
     p.write_text(
-        'subject = "Hi {name}"\nbody = "Hi"\ndays = 1\n\n'
+        'subject = "Hi {{ name }}"\nbody = "Hi"\ndays = 1\n\n'
         '[[calendars]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\n',
         encoding="utf-8",
     )
@@ -1010,7 +1020,7 @@ def test_sent_column_shown_in_output(config_file, mock_sent_log):
         result = runner.invoke(main, ["--config", str(config_file), "--dry-run", "--yes"])
     assert result.exit_code == 0
     assert "Sent" in result.output
-    # Unsent recipients with email show ○; no ✓ expected on a fresh log
+    # Recipients with email but outside advance window show ○; no ✓ on a fresh log
     assert "○" in result.output
 
 
@@ -1081,12 +1091,14 @@ def _eligible_recs():
         Recipient(
             name="Alice",
             email="alice@example.com",
+            phone="+1234567890",
             start=date.today() + timedelta(days=5),
             end=date.today() + timedelta(days=10),
         ),
         Recipient(
             name="Bob",
             email="bob@example.com",
+            phone="+0987654321",
             start=date.today() + timedelta(days=7),
             end=date.today() + timedelta(days=12),
         ),
@@ -1287,11 +1299,47 @@ def test_past_checkin_not_sent_in_yes_mode(tmp_path):
     assert "Would send 1" in result.output  # only FutureGuest
 
 
-def test_sent_marker_circle_for_not_yet_eligible(tmp_path):
-    """Recipient with email but outside advance window shows ○."""
-    # advance=0 → only today-or-past eligible; far-future start → ○
+def test_sent_marker_circle_shown_for_email_recipient(tmp_path):
+    """○ IS shown for not-yet-eligible recipients that have an email (default mode)."""
     recs = [Recipient(name="Guest", email="g@x.com", start=date(2099, 1, 1), end=date(2099, 1, 5))]
     result = _run_with_calendars(tmp_path, [("Villa", "P", recs)], extra_args=["--advance", "0"])
+    assert result.exit_code == 0
+    assert "○" in result.output
+
+
+def test_sent_marker_circle_not_shown_for_no_email_without_flag(tmp_path):
+    """○ is NOT shown for no-email recipients when send_without_email is False (default)."""
+    recs = [Recipient(name="NoEmail", email=None, start=date(2099, 1, 1), end=date(2099, 1, 5))]
+    result = _run_with_calendars(tmp_path, [("Villa", "P", recs)], extra_args=["--advance", "0"])
+    assert result.exit_code == 0
+    assert "○" not in result.output
+
+
+def test_sent_marker_circle_shown_when_send_without_email(tmp_path):
+    """○ IS shown for not-yet-eligible recipients when send_without_email = true."""
+    recs = [Recipient(name="Guest", email="g@x.com", start=date(2099, 1, 1), end=date(2099, 1, 5))]
+    lines = [
+        'subject = "Hi"',
+        'body = "Hi"',
+        "send_without_email = true",
+        "",
+        "[[calendars]]",
+        'name = "Villa"',
+        'provider = "P"',
+        'url = "https://example.com/0.ics"',
+    ]
+    p = tmp_path / "config.toml"
+    p.write_text("\n".join(lines))
+    from unittest.mock import patch
+
+    from click.testing import CliRunner
+
+    runner = CliRunner()
+    with patch(
+        "welcomer.cli.fetch_recipients",
+        side_effect=lambda u, force_refresh=False: recs,
+    ):
+        result = runner.invoke(main, ["--config", str(p), "--dry-run", "--yes", "--advance", "0"])
     assert result.exit_code == 0
     assert "○" in result.output
 
@@ -1370,7 +1418,7 @@ def test_advance_from_config(tmp_path):
     """advance in config controls eligibility window."""
     p = tmp_path / "config.toml"
     p.write_text(
-        'subject = "Hi {name}"\nbody = "Hi"\nadvance = 30\n\n'
+        'subject = "Hi {{ name }}"\nbody = "Hi"\nadvance = 30\n\n'
         '[[calendars]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\n',
         encoding="utf-8",
     )
@@ -1394,7 +1442,7 @@ def test_advance_cli_overrides_config(tmp_path):
     """--advance CLI flag overrides config advance value."""
     p = tmp_path / "config.toml"
     p.write_text(
-        'subject = "Hi {name}"\nbody = "Hi"\nadvance = 0\n\n'
+        'subject = "Hi {{ name }}"\nbody = "Hi"\nadvance = 0\n\n'
         '[[calendars]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\n',
         encoding="utf-8",
     )
@@ -1415,10 +1463,10 @@ def test_advance_cli_overrides_config(tmp_path):
 
 
 def test_advance_ineligible_shows_circle(tmp_path):
-    """Reservations outside the advance window show ○."""
+    """Reservations with email outside the advance window show ○."""
     p = tmp_path / "config.toml"
     p.write_text(
-        'subject = "Hi {name}"\nbody = "Hi"\n\n'
+        'subject = "Hi {{ name }}"\nbody = "Hi"\n\n'
         '[[calendars]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\n',
         encoding="utf-8",
     )
@@ -1455,12 +1503,14 @@ def test_interactive_prompts_eligible_recipients(smtp_config_file, mock_sent_log
         Recipient(
             name="Alice",
             email="alice@example.com",
+            phone="+1234567890",
             start=date.today() + timedelta(days=5),
             end=date.today() + timedelta(days=10),
         ),
         Recipient(
             name="Bob",
             email="bob@example.com",
+            phone="+0987654321",
             start=date.today() + timedelta(days=200),
             end=date.today() + timedelta(days=205),
         ),
@@ -1488,8 +1538,8 @@ def test_interactive_prompts_eligible_recipients(smtp_config_file, mock_sent_log
 # ---------------------------------------------------------------------------
 
 TOML_WITH_SMTP = """\
-subject = "Welcome, {name}!"
-body = "Hi {name}, glad to have you."
+subject = "Welcome, {{ name }}!"
+body = "Hi {{ name }}, glad to have you."
 
 [smtp]
 host = "localhost"
@@ -1516,6 +1566,7 @@ def _eligible_recipients():
         Recipient(
             name="Alice",
             email="alice@example.com",
+            phone="+1234567890",
             start=date.today() + timedelta(days=3),
             end=date.today() + timedelta(days=7),
         ),
@@ -1777,3 +1828,167 @@ def test_test_config_jiri_phone_has_no_spaces():
     assert result.exit_code == 0
     assert "+420606789012" in result.output
     assert "+420 606 789 012" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# Interactive mode: prompts for missing email / phone
+# ---------------------------------------------------------------------------
+
+
+def _make_interactive_config(tmp_path, extra_toml=""):
+    """Minimal config file for interactive-mode tests."""
+    p = tmp_path / "config.toml"
+    p.write_text(
+        'subject = "Hi {{ name }}"\n'
+        'body = "Email: {{ email }} Phone: {{ phone }}"\n' + extra_toml + "\n[[calendars]]\n"
+        'name = "Villa"\n'
+        'url = "https://example.com/0.ics"\n',
+        encoding="utf-8",
+    )
+    return p
+
+
+def _interactive_invoke(config_path, recs, input_str, extra_args=()):
+    runner = CliRunner()
+    with patch(
+        "welcomer.cli.fetch_recipients",
+        side_effect=lambda u, force_refresh=False: recs,
+    ):
+        return runner.invoke(main, ["--config", str(config_path), *extra_args], input=input_str)
+
+
+def _guest(today, email=None, phone="", days_ahead=3):
+    return Recipient(
+        name="Guest",
+        email=email,
+        phone=phone,
+        start=today + timedelta(days=days_ahead),
+        end=today + timedelta(days=days_ahead + 4),
+    )
+
+
+def test_interactive_prompts_for_missing_email(tmp_path, mock_sent_log):
+    """When email is absent, interactive mode asks for it before confirming send."""
+    today = date.today()
+    cfg = _make_interactive_config(tmp_path)
+    # Input: provide email, then confirm send
+    result = _interactive_invoke(cfg, [_guest(today, phone="+123")], "guest@example.com\ny\n")
+    assert result.exit_code == 0
+    assert "Email for Guest" in result.output
+    assert "guest@example.com" in result.output
+
+
+def test_interactive_prompts_for_missing_phone(tmp_path, mock_sent_log):
+    """When phone is absent, interactive mode asks for it before confirming send."""
+    today = date.today()
+    cfg = _make_interactive_config(tmp_path)
+    # Input: provide phone, then confirm send
+    result = _interactive_invoke(cfg, [_guest(today, email="g@x.com")], "+420123456789\nn\n")
+    assert result.exit_code == 0
+    assert "Phone for Guest" in result.output
+
+
+def test_interactive_prompts_for_both_when_both_missing(tmp_path, mock_sent_log):
+    """When both email and phone are absent, interactive mode prompts for both."""
+    today = date.today()
+    cfg = _make_interactive_config(tmp_path)
+    # Input: email, phone, then deny send
+    result = _interactive_invoke(cfg, [_guest(today)], "g@x.com\n+123\nn\n")
+    assert result.exit_code == 0
+    assert "Email for Guest" in result.output
+    assert "Phone for Guest" in result.output
+
+
+def test_interactive_skips_when_email_left_blank(tmp_path, mock_sent_log):
+    """If user leaves email blank and no send_without_email, the row is skipped."""
+    today = date.today()
+    cfg = _make_interactive_config(tmp_path)
+    # Input: blank email → skip
+    result = _interactive_invoke(cfg, [_guest(today, phone="+123")], "\n")
+    assert result.exit_code == 0
+    assert "Send to Guest" not in result.output
+    assert "Sent 0" in result.output
+
+
+def test_interactive_no_email_prompt_when_email_present(tmp_path, mock_sent_log):
+    """No email prompt is shown when the recipient already has an email."""
+    today = date.today()
+    cfg = _make_interactive_config(tmp_path)
+    result = _interactive_invoke(cfg, [_guest(today, email="g@x.com", phone="+123")], "n\n")
+    assert result.exit_code == 0
+    assert "Email for Guest" not in result.output
+
+
+def test_interactive_no_phone_prompt_when_phone_present(tmp_path, mock_sent_log):
+    """No phone prompt is shown when the recipient already has a phone."""
+    today = date.today()
+    cfg = _make_interactive_config(tmp_path)
+    result = _interactive_invoke(cfg, [_guest(today, email="g@x.com", phone="+123")], "n\n")
+    assert result.exit_code == 0
+    assert "Phone for Guest" not in result.output
+
+
+def test_interactive_rerenders_body_with_provided_email(tmp_path, mock_sent_log):
+    """{email} in the body template is filled with the user-provided email on send."""
+    today = date.today()
+    rec = Recipient(
+        name="Guest",
+        email=None,
+        phone="+123",
+        start=today + timedelta(days=3),
+        end=today + timedelta(days=7),
+    )
+    # Include smtp so _do_send actually calls send_email
+    cfg = _make_interactive_config(
+        tmp_path,
+        extra_toml='[smtp]\nhost = "localhost"\nport = 1025\nfrom = "from@x.com"\n',
+    )
+    with patch("welcomer.cli.send_email") as mock_send:
+        result = _interactive_invoke(cfg, [rec], "provided@x.com\ny\n")
+    assert result.exit_code == 0
+    mock_send.assert_called_once()
+    _cfg, to, _subject, body = mock_send.call_args[0]
+    assert to == "provided@x.com"
+    assert "Email: provided@x.com" in body
+
+
+def test_interactive_rerenders_body_with_provided_phone(tmp_path, mock_sent_log):
+    """{phone} in the body template is filled with the user-provided phone on send."""
+    today = date.today()
+    rec = Recipient(
+        name="Guest",
+        email="g@x.com",
+        phone="",
+        start=today + timedelta(days=3),
+        end=today + timedelta(days=7),
+    )
+    cfg = _make_interactive_config(
+        tmp_path,
+        extra_toml='[smtp]\nhost = "localhost"\nport = 1025\nfrom = "from@x.com"\n',
+    )
+    with patch("welcomer.cli.send_email") as mock_send:
+        result = _interactive_invoke(cfg, [rec], "+420999888777\ny\n")
+    assert result.exit_code == 0
+    mock_send.assert_called_once()
+    _cfg, _to, _subject, body = mock_send.call_args[0]
+    assert "+420999888777" in body
+
+
+def test_interactive_yes_mode_does_not_prompt_for_missing_contact(tmp_path, mock_sent_log):
+    """--yes mode never prompts for missing email or phone."""
+    today = date.today()
+    cfg = _make_interactive_config(tmp_path)
+    result = _interactive_invoke(cfg, [_guest(today)], "", extra_args=["--yes", "--dry-run"])
+    assert result.exit_code == 0
+    assert "Email for Guest" not in result.output
+    assert "Phone for Guest" not in result.output
+
+
+def test_interactive_dry_run_does_not_prompt_for_missing_contact(tmp_path, mock_sent_log):
+    """--dry-run without --yes does not enter interactive mode, so no contact prompts."""
+    today = date.today()
+    cfg = _make_interactive_config(tmp_path)
+    result = _interactive_invoke(cfg, [_guest(today)], "", extra_args=["--dry-run"])
+    assert result.exit_code == 0
+    assert "Email for Guest" not in result.output
+    assert "Phone for Guest" not in result.output

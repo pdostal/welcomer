@@ -131,6 +131,16 @@ def _merge_multi_property(recipients: list[Recipient]) -> list[Recipient]:
         phone = base.phone or next(
             (recipients[i].phone for i in indices if recipients[i].phone), ""
         )
+        # Build property → official_name mapping; fall back to property name when not set.
+        prop_to_official: dict[str, str] = {
+            recipients[i].extra.get("property", ""): (
+                recipients[i].extra.get("official_name", "")
+                or recipients[i].extra.get("property", "")
+            )
+            for i in indices
+        }
+        sorted_props = sorted(props)
+        official_name = ", ".join(prop_to_official.get(p, p) for p in sorted_props)
         merged = Recipient(
             name=base.name,
             email=email,
@@ -139,7 +149,12 @@ def _merge_multi_property(recipients: list[Recipient]) -> list[Recipient]:
             kids=base.kids,
             start=min(starts) if starts else base.start,
             end=max(ends) if ends else base.end,
-            extra={**base.extra, "property": "Multi", "properties": sorted(props)},
+            extra={
+                **base.extra,
+                "property": "Multi",
+                "properties": sorted_props,
+                "official_name": official_name,
+            },
         )
         replacements[indices[0]] = merged
         for i in indices[1:]:
@@ -155,7 +170,7 @@ def _merge_multi_property(recipients: list[Recipient]) -> list[Recipient]:
 
 def _apply_filters(calendars, property_filter, provider_filter):
     if property_filter:
-        calendars = [c for c in calendars if property_filter.lower() in c.name.lower()]
+        calendars = [c for c in calendars if property_filter.lower() in c.property.lower()]
     if provider_filter:
         calendars = [c for c in calendars if provider_filter.lower() in c.provider.lower()]
     return calendars
@@ -197,21 +212,36 @@ def _append_sent_log(path: Path, key: str) -> None:
         f.write(key + "\n")
 
 
-def _sent_marker(email: str, already_sent: bool, eligible: bool, past_checkin: bool) -> str:
+def _sent_marker(
+    email: str,
+    already_sent: bool,
+    eligible: bool,
+    past_checkin: bool,
+    send_without_email: bool = False,
+) -> str:
     """Return a Rich-markup sent-status cell, always 4 visible chars wide.
 
     ✓  green  — already sent (in sent.log)
     ●  green  — eligible to send now (today ≤ check-in ≤ today + advance days)
-    ○  yellow — not yet eligible (check-in too far in the future)
-    (empty)   — no email address, or check-in already passed and not yet sent
+    ○  yellow — not yet eligible; only shown when ``send_without_email`` is True
+    (empty)   — no actionable status
+
+    ``○`` is only displayed when ``send_without_email`` is True, because that is the
+    only mode where not-yet-eligible reservations without a direct email address are
+    still destined to be sent (to CC/BCC). In the default mode (send_without_email=False)
+    showing ``○`` would be misleading — nothing will be sent to those rows.
+    ``●`` is shown whenever a recipient has an email address and is within the eligibility
+    window, regardless of ``send_without_email``.
     """
     if already_sent:
         return "[green]✓   [/green]"
-    if not email or past_checkin:
+    if past_checkin:
         return "    "
-    if eligible:
+    if eligible and (email or send_without_email):
         return "[green]●   [/green]"
-    return "[yellow]○   [/yellow]"
+    if not eligible and (email or send_without_email):
+        return "[yellow]○   [/yellow]"
+    return "    "
 
 
 @dataclass
@@ -409,17 +439,18 @@ def main(
         filtered = [
             (cal, recs)
             for cal, recs in all_calendars
-            if (not property_filter or property_filter.lower() in cal.name.lower())
+            if (not property_filter or property_filter.lower() in cal.property.lower())
             and (not provider_filter or provider_filter.lower() in cal.provider.lower())
         ]
-        for cal, recs in sorted(filtered, key=lambda x: x[0].name):
+        for cal, recs in sorted(filtered, key=lambda x: x[0].property):
             for r in recs:
-                r.extra["property"] = cal.name
+                r.extra["property"] = cal.property
+                r.extra["official_name"] = cal.official_name
                 r.extra["provider"] = cal.provider
             provider_str = f" · {cal.provider}" if cal.provider else ""
             if not silent:
                 console.print(
-                    f"[dim]Loaded {len(recs)} event(s) from {cal.name}{provider_str}[/dim]"
+                    f"[dim]Loaded {len(recs)} event(s) from {cal.property}{provider_str}[/dim]"
                 )
             recipients.extend(recs)
     else:
@@ -442,15 +473,16 @@ def main(
 
         for cal in sorted(
             _apply_filters(cfg.calendars, property_filter, provider_filter),
-            key=lambda c: c.name,
+            key=lambda c: c.property,
         ):
-            label = cal.name or cal.url
+            label = cal.property or cal.url
             try:
                 found, from_cache = _load_calendar(
                     cal.url, config_path.parent, force_refresh=force_refresh
                 )
                 for r in found:
-                    r.extra["property"] = cal.name
+                    r.extra["property"] = cal.property
+                    r.extra["official_name"] = cal.official_name
                     r.extra["provider"] = cal.provider
                 provider_str = f" · {cal.provider}" if cal.provider else ""
                 cache_str = " (cached)" if from_cache else ""
@@ -509,6 +541,8 @@ def main(
     results = build_welcomes(cfg, recipients, dry_run=dry_run)
     rows = _build_table_rows(results, recipients, cfg, today, effective_advance)
 
+    send_without_email = cfg.send_without_email
+
     show_guests = any(row.guests_str for row in rows)
 
     _dates = [
@@ -518,7 +552,7 @@ def main(
     w_name = max(max(len(row.display_name) for row in rows), len("👤 Name") + 1)
     w_date = max(max(len(d) for d in _dates), len("📅 Date") + 1)
     w_dur = max(max(len(row.duration_str) for row in rows), len("⏳") + 1)
-    w_prop = max(max(len(row.prop_col) for row in rows), len("🏡 Calendar") + 1)
+    w_prop = max(max(len(row.prop_col) for row in rows), len("🏡 Property") + 1)
     w_email = max(max(len(row.email) for row in rows), len("📧 E-mail") + 1)
     # Phone needs a fixed width when guests are shown so the guests column aligns.
     w_phone = max(max(len(row.phone) for row in rows), len("📞 Phone")) if show_guests else 0
@@ -533,7 +567,7 @@ def main(
         f"{'📅 Date':<{w_date - 1}}  "
         f"{'⏳':<{w_dur - 1}}  "
         f"{'✉️':<4}  "
-        f"{'🏡 Calendar':<{w_prop - 1}}  "
+        f"{'🏡 Property':<{w_prop - 1}}  "
         f"{'📧 E-mail':<{w_email - 1}}  "
     )
     if show_guests:
@@ -552,11 +586,14 @@ def main(
             else row.start_str or row.end_str or ""
         )
         name_color = _name_color(row.start, row.end, today)
+        marker = _sent_marker(
+            row.email, already_sent, row.eligible, row.past_checkin, send_without_email
+        )
         line = (
             f"[bold {name_color}]{row.display_name:<{w_name}}[/bold {name_color}]"
             f"  [{date_color}]{date_col:<{w_date}}[/{date_color}]"
             f"  [{date_color}]{row.duration_str:<{w_dur}}[/{date_color}]"
-            f"  {_sent_marker(row.email, already_sent, row.eligible, row.past_checkin)}"
+            f"  {marker}"
             f"  {row.prop_col:<{w_prop}}"
             f"  [bold blue]{escape(row.email):<{w_email}}[/bold blue]"
         )
@@ -585,17 +622,23 @@ def main(
             send_email(smtp_cfg, email_addr, result.subject, result.body)
             return True
         except Exception as exc:
-            console.print(f"[red]Failed to send to {email_addr}: {exc}[/red]")
+            console.print(f"[red]Failed to send to {email_addr or '(no address)'}: {exc}[/red]")
             return False
 
+    def _row_has_dest(row: _TableRow) -> bool:
+        """True when there is somewhere to send the email."""
+        return bool(row.email) or (
+            send_without_email and cfg.smtp is not None and bool(cfg.smtp.cc or cfg.smtp.bcc)
+        )
+
     if test_config:
-        sent_count = sum(1 for r in results if r.email)
+        sent_count = sum(1 for row in rows if row.eligible and _row_has_dest(row))
         if not silent:
             console.print(f"[yellow]Would send {sent_count} message(s).[/yellow]")
     elif yes or dry_run:
         confirmed = 0
         for row in rows:
-            if not row.email:
+            if not _row_has_dest(row):
                 continue
             if not row.eligible:
                 continue
@@ -616,20 +659,64 @@ def main(
         console.print()
         confirmed = 0
         for row in rows:
-            if not row.email:
-                continue
             if not row.eligible:
                 continue
             key = _sent_key(row.recipient, row.prop)
             if key in sent_keys:
                 continue
+
+            rec = row.recipient
+            email = rec.email or ""
+            phone = rec.phone or ""
+
+            # Prompt for missing contact details before rendering the email,
+            # since {email} and {phone} may appear in the subject/body template.
+            if not email:
+                val = click.prompt(
+                    f"Email for {row.display_name}" + (f" at {row.prop}" if row.prop else ""),
+                    default="",
+                    show_default=False,
+                ).strip()
+                email = val
+
+            if not rec.phone:
+                val = click.prompt(
+                    f"Phone for {row.display_name}",
+                    default="",
+                    show_default=False,
+                ).strip()
+                phone = val
+
+            # Re-render subject/body if contact data was filled in by the user.
+            result = row.result
+            if email != (rec.email or "") or phone != (rec.phone or ""):
+                updated_rec = Recipient(
+                    name=rec.name,
+                    email=email or None,
+                    phone=phone,
+                    adults=rec.adults,
+                    kids=rec.kids,
+                    start=rec.start,
+                    end=rec.end,
+                    extra=rec.extra,
+                )
+                result = build_welcomes(cfg, [updated_rec])[0]
+
+            # Check there is somewhere to deliver the email after prompting.
+            has_dest = bool(email) or (
+                send_without_email and cfg.smtp is not None and bool(cfg.smtp.cc or cfg.smtp.bcc)
+            )
+            if not has_dest:
+                continue
+
             date_str = f" ({row.start_str} → {row.end_str})" if row.start_str else ""
             prop_str = f" at {row.prop}" if row.prop else ""
+            dest_str = email if email else "(no email — sending to CC/BCC)"
             if click.confirm(
-                f"Send to {row.display_name} ({row.email}){prop_str}{date_str}?", default=False
+                f"Send to {row.display_name} ({dest_str}){prop_str}{date_str}?", default=False
             ):
                 if not dry_run:
-                    if not _do_send(cfg.smtp, row.result, row.email):
+                    if not _do_send(cfg.smtp, result, email):
                         continue
                     _append_sent_log(SENT_LOG_PATH, key)
                     sent_keys.add(key)
