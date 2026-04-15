@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from ..config import CalendarConfig, WelcomerConfig
+from ..config import CalendarConfig, MessageConfig, WelcomerConfig
 from ..ical import Recipient
 
 # Offsets from today (in days) for each test guest
@@ -35,9 +35,12 @@ _JIRI_START = 150
 _JIRI_END = 159
 
 TEST_CONFIG = WelcomerConfig(
-    subject="Welcome to {{ property }}, {{ name }}!",
     date_format="%d. %m. %Y",
-    body="""\
+    messages=[
+        MessageConfig(
+            name="default",
+            subject="Welcome to {{ property }}, {{ name }}!",
+            body="""\
 Dear {{ name }},
 
 Great news — your stay at **{{ property }}** is locked in! 🎉
@@ -54,6 +57,8 @@ See you soon — try not to lose your keys on the way,
 
 The {{ property }} team
 """,
+        )
+    ],
     advance=14,
 )
 
@@ -68,6 +73,7 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
                 official_name="Horský Apartmán s.r.o.",
                 provider="HousePal",
                 url="",
+                message="default",
             ),
             [
                 Recipient(
@@ -99,6 +105,7 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
                 official_name="Horský Apartmán s.r.o.",
                 provider="StayBook",
                 url="",
+                message="default",
             ),
             [
                 Recipient(
@@ -121,6 +128,7 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
                 official_name="Chalupa U Lesa - J. Novák",
                 provider="HousePal",
                 url="",
+                message="default",
             ),
             [
                 Recipient(
@@ -159,6 +167,7 @@ def get_test_calendars() -> list[tuple[CalendarConfig, list[Recipient]]]:
                 official_name="",
                 provider="StayBook",
                 url="",
+                message="default",
             ),
             [
                 Recipient(

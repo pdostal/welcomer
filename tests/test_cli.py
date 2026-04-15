@@ -15,15 +15,16 @@ def _run_with_calendars(tmp_path, calendars, extra_args=()):
     Helper for sort/filter tests. calendars is a list of (name, provider, [Recipient]).
     Creates a minimal config and mocks fetch_recipients per URL.
     """
-    lines = ['subject = "Hi {{ name }}"', 'body = "Hi"', ""]
+    lines = ["[[message]]", 'name = "default"', 'subject = "Hi {{ name }}"', 'body = "Hi"', ""]
     url_map = {}
     for i, (cal_name, provider, recs) in enumerate(calendars):
         url = f"https://example.com/{i}.ics"
         lines += [
-            "[[calendars]]",
+            "[[calendar]]",
             f'name = "{cal_name}"',
             f'provider = "{provider}"',
             f'url = "{url}"',
+            'message = "default"',
             "",
         ]
         url_map[url] = recs
@@ -41,12 +42,15 @@ def _run_with_calendars(tmp_path, calendars, extra_args=()):
 
 
 TOML_CONTENT = """\
+[[message]]
+name = "default"
 subject = "Welcome, {{ name }}!"
 body = "Hi {{ name }}, glad to have you."
 
-[[calendars]]
+[[calendar]]
 name = "Test Cal"
 url = "https://example.com/test.ics"
+message = "default"
 """
 
 MOCK_RECIPIENTS = [
@@ -285,6 +289,62 @@ def test_sort_full_order_by_start_date():
         < table.index("Pavel")
         < table.index("Jiří")
     )
+
+
+def test_table_has_count_column():
+    runner = CliRunner()
+    result = runner.invoke(main, ["--dry-run", "--test-config"])
+    header = next(line for line in result.output.splitlines() if line.lstrip().startswith("#"))
+    assert header.startswith("#")
+
+
+def test_count_column_skips_active_and_same_day_reservations(tmp_path):
+    today = date.today()
+    recs = [
+        Recipient(
+            name="Past",
+            email="past@example.com",
+            start=today - timedelta(days=10),
+            end=today - timedelta(days=5),
+        ),
+        Recipient(
+            name="CheckinToday",
+            email="checkin@example.com",
+            start=today,
+            end=today + timedelta(days=2),
+        ),
+        Recipient(
+            name="Ongoing",
+            email="ongoing@example.com",
+            start=today - timedelta(days=2),
+            end=today + timedelta(days=2),
+        ),
+        Recipient(
+            name="CheckoutToday",
+            email="checkout@example.com",
+            start=today - timedelta(days=4),
+            end=today,
+        ),
+        Recipient(
+            name="Future",
+            email="future@example.com",
+            start=today + timedelta(days=3),
+            end=today + timedelta(days=6),
+        ),
+    ]
+    result = _run_with_calendars(tmp_path, [("Cal", "Prov", recs)])
+    lines = result.output.splitlines()
+    header_index = next(i for i, line in enumerate(lines) if line.lstrip().startswith("#"))
+    table_lines = lines[header_index + 1 :]
+    future_line = next(line for line in table_lines if "Future" in line)
+    checkin_line = next(line for line in table_lines if "CheckinToday" in line)
+    ongoing_line = next(line for line in table_lines if "Ongoing" in line)
+    checkout_line = next(line for line in table_lines if "CheckoutToday" in line)
+
+    assert future_line.startswith("1 ")
+    assert checkin_line.startswith("  ")
+    assert ongoing_line.startswith("  ")
+    assert checkout_line.startswith("  ")
 
 
 def test_sort_by_end_date_when_same_start(tmp_path):
@@ -672,7 +732,9 @@ def test_fetch_failure(config_file):
 
 def test_no_calendars_exits_zero(tmp_path):
     p = tmp_path / "config.toml"
-    p.write_text('subject = "Hi"\nbody = "Hello"\n', encoding="utf-8")
+    p.write_text(
+        '[[message]]\nname = "default"\nsubject = "Hi"\nbody = "Hello"\n', encoding="utf-8"
+    )
     runner = CliRunner()
     result = runner.invoke(main, ["--config", str(p)])
     assert result.exit_code == 0
@@ -690,9 +752,9 @@ def test_no_recipients_exits_zero(config_file):
 def test_multiple_calendars_partial_failure(tmp_path):
     p = tmp_path / "config.toml"
     p.write_text(
-        'subject = "Hi {{ name }}"\nbody = "Hello {{ name }}"\n\n'
-        '[[calendars]]\nname = "Good"\nurl = "https://example.com/good.ics"\n\n'
-        '[[calendars]]\nname = "Bad"\nurl = "https://example.com/bad.ics"\n',
+        '[[message]]\nname = "default"\nsubject = "Hi {{ name }}"\nbody = "Hello {{ name }}"\n\n'
+        '[[calendar]]\nname = "Good"\nurl = "https://example.com/good.ics"\nmessage = "default"\n\n'
+        '[[calendar]]\nname = "Bad"\nurl = "https://example.com/bad.ics"\nmessage = "default"\n',
         encoding="utf-8",
     )
     good_recipients = [
@@ -981,8 +1043,9 @@ def test_days_from_config(tmp_path):
     # days = 1 in config → only today+1 window; all test fixtures are far future → no recipients
     p = tmp_path / "config.toml"
     p.write_text(
-        'subject = "Hi {{ name }}"\nbody = "Hi"\ndays = 1\n\n'
-        '[[calendars]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\n',
+        "days = 1\n\n"
+        '[[message]]\nname = "default"\nsubject = "Hi {{ name }}"\nbody = "Hi"\n\n'
+        '[[calendar]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\nmessage = "default"\n',
         encoding="utf-8",
     )
     recs = [Recipient(name="Alice", email="a@x.com", start=date(2030, 1, 1), end=date(2030, 1, 5))]
@@ -997,8 +1060,9 @@ def test_days_cli_overrides_config(tmp_path):
     # config has days = 1, CLI has --days 3650 → far-future recipient should appear
     p = tmp_path / "config.toml"
     p.write_text(
-        'subject = "Hi {{ name }}"\nbody = "Hi"\ndays = 1\n\n'
-        '[[calendars]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\n',
+        '[[message]]\nname = "default"\nsubject = "Hi {{ name }}"\nbody = "Hi"\n\n'
+        "days = 1\n"
+        '[[calendar]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\nmessage = "default"\n',
         encoding="utf-8",
     )
     recs = [Recipient(name="Alice", email="a@x.com", start=date(2030, 1, 1), end=date(2030, 1, 5))]
@@ -1319,14 +1383,17 @@ def test_sent_marker_circle_shown_when_send_without_email(tmp_path):
     """○ IS shown for not-yet-eligible recipients when send_without_email = true."""
     recs = [Recipient(name="Guest", email="g@x.com", start=date(2099, 1, 1), end=date(2099, 1, 5))]
     lines = [
+        "[[message]]",
+        'name = "default"',
         'subject = "Hi"',
         'body = "Hi"',
         "send_without_email = true",
         "",
-        "[[calendars]]",
+        "[[calendar]]",
         'name = "Villa"',
         'provider = "P"',
         'url = "https://example.com/0.ics"',
+        'message = "default"',
     ]
     p = tmp_path / "config.toml"
     p.write_text("\n".join(lines))
@@ -1418,8 +1485,9 @@ def test_advance_from_config(tmp_path):
     """advance in config controls eligibility window."""
     p = tmp_path / "config.toml"
     p.write_text(
-        'subject = "Hi {{ name }}"\nbody = "Hi"\nadvance = 30\n\n'
-        '[[calendars]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\n',
+        "advance = 30\n\n"
+        '[[message]]\nname = "default"\nsubject = "Hi {{ name }}"\nbody = "Hi"\n\n'
+        '[[calendar]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\nmessage = "default"\n',
         encoding="utf-8",
     )
     # start in 20 days — eligible with advance=30, not eligible with advance=0
@@ -1442,8 +1510,9 @@ def test_advance_cli_overrides_config(tmp_path):
     """--advance CLI flag overrides config advance value."""
     p = tmp_path / "config.toml"
     p.write_text(
-        'subject = "Hi {{ name }}"\nbody = "Hi"\nadvance = 0\n\n'
-        '[[calendars]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\n',
+        '[[message]]\nname = "default"\nsubject = "Hi {{ name }}"\nbody = "Hi"\n\n'
+        "advance = 0\n"
+        '[[calendar]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\nmessage = "default"\n',
         encoding="utf-8",
     )
     # start in 50 days — not eligible with advance=0, but eligible with --advance 60
@@ -1466,8 +1535,8 @@ def test_advance_ineligible_shows_circle(tmp_path):
     """Reservations with email outside the advance window show ○."""
     p = tmp_path / "config.toml"
     p.write_text(
-        'subject = "Hi {{ name }}"\nbody = "Hi"\n\n'
-        '[[calendars]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\n',
+        '[[message]]\nname = "default"\nsubject = "Hi {{ name }}"\nbody = "Hi"\n\n'
+        '[[calendar]]\nname = "Cal"\nurl = "https://example.com/cal.ics"\nmessage = "default"\n',
         encoding="utf-8",
     )
     recs = [
@@ -1538,6 +1607,8 @@ def test_interactive_prompts_eligible_recipients(smtp_config_file, mock_sent_log
 # ---------------------------------------------------------------------------
 
 TOML_WITH_SMTP = """\
+[[message]]
+name = "default"
 subject = "Welcome, {{ name }}!"
 body = "Hi {{ name }}, glad to have you."
 
@@ -1546,9 +1617,10 @@ host = "localhost"
 port = 1025
 from = "welcomer@example.com"
 
-[[calendars]]
+[[calendar]]
 name = "Test Cal"
 url = "https://example.com/test.ics"
+message = "default"
 """
 
 
@@ -1729,9 +1801,11 @@ def test_overlap_warning_shown_outside_days_window(tmp_path):
     """Overlap warning appears even when overlapping events fall outside --days."""
     p = tmp_path / "config.toml"
     p.write_text(
-        'subject = "Hi"\nbody = "Hi"\n'
-        '[[calendars]]\nname = "Villa"\nprovider = "P"\nurl = "https://x.com/a.ics"\n'
-        '[[calendars]]\nname = "Villa"\nprovider = "Q"\nurl = "https://x.com/b.ics"\n'
+        '[[message]]\nname = "default"\nsubject = "Hi"\nbody = "Hi"\n'
+        '[[calendar]]\nname = "Villa"\nprovider = "P"\nurl = "https://x.com/a.ics"\n'
+        'message = "default"\n'
+        '[[calendar]]\nname = "Villa"\nprovider = "Q"\nurl = "https://x.com/b.ics"\n'
+        'message = "default"\n'
     )
     # Two overlapping reservations 60 days out — outside --days 1
     far = date.today() + timedelta(days=60)
@@ -1839,10 +1913,12 @@ def _make_interactive_config(tmp_path, extra_toml=""):
     """Minimal config file for interactive-mode tests."""
     p = tmp_path / "config.toml"
     p.write_text(
+        '[[message]]\nname = "default"\n'
         'subject = "Hi {{ name }}"\n'
-        'body = "Email: {{ email }} Phone: {{ phone }}"\n' + extra_toml + "\n[[calendars]]\n"
+        'body = "Email: {{ email }} Phone: {{ phone }}"\n' + extra_toml + "\n[[calendar]]\n"
         'name = "Villa"\n'
-        'url = "https://example.com/0.ics"\n',
+        'url = "https://example.com/0.ics"\n'
+        'message = "default"\n',
         encoding="utf-8",
     )
     return p

@@ -7,19 +7,20 @@ import pytest
 from welcomer.config import WelcomerConfig, find_default_config
 
 SAMPLE = {
-    "subject": "Hello {name}!",
-    "body": "Hi {name}, welcome aboard.",
-    "calendars": [
-        {"url": "https://example.com/a.ics", "property": "Cal A"},
-        {"url": "https://example.com/b.ics"},
+    "message": [
+        {"name": "default", "subject": "Hello {name}!", "body": "Hi {name}, welcome aboard."},
+        {"name": "vip", "subject": "Welcome, {name}!", "body": "Great to have you."},
+    ],
+    "calendar": [
+        {"url": "https://example.com/a.ics", "property": "Cal A", "message": "default"},
+        {"url": "https://example.com/b.ics", "message": "vip"},
     ],
 }
 
 
 def test_from_dict_basic():
     cfg = WelcomerConfig.from_dict(SAMPLE)
-    assert cfg.subject == "Hello {name}!"
-    assert cfg.body == "Hi {name}, welcome aboard."
+    assert len(cfg.messages) == 2
     assert len(cfg.calendars) == 2
 
 
@@ -27,71 +28,142 @@ def test_calendars_parsed():
     cfg = WelcomerConfig.from_dict(SAMPLE)
     assert cfg.calendars[0].url == "https://example.com/a.ics"
     assert cfg.calendars[0].property == "Cal A"
+    assert cfg.calendars[0].message == "default"
     assert cfg.calendars[1].property == ""
+    assert cfg.calendars[1].message == "vip"
 
 
-def test_calendars_name_key_backward_compat():
+def test_calendar_name_key_backward_compat():
     """Old configs using 'name' instead of 'property' still work."""
     cfg = WelcomerConfig.from_dict(
-        {"calendars": [{"url": "https://example.com/a.ics", "name": "Old Cal"}]}
+        {
+            "message": [{"name": "default", "subject": "Hi", "body": "Hi"}],
+            "calendar": [
+                {"url": "https://example.com/a.ics", "name": "Old Cal", "message": "default"}
+            ],
+        }
     )
     assert cfg.calendars[0].property == "Old Cal"
 
 
-def test_calendars_property_takes_precedence_over_name():
+def test_calendar_property_takes_precedence_over_name():
     """When both 'property' and 'name' are present, 'property' wins."""
     cfg = WelcomerConfig.from_dict(
-        {"calendars": [{"url": "https://x.com/a.ics", "property": "New Name", "name": "Old Name"}]}
+        {
+            "message": [{"name": "default", "subject": "Hi", "body": "Hi"}],
+            "calendar": [
+                {
+                    "url": "https://x.com/a.ics",
+                    "property": "New Name",
+                    "name": "Old Name",
+                    "message": "default",
+                }
+            ],
+        }
     )
     assert cfg.calendars[0].property == "New Name"
 
 
-def test_calendars_official_name_loaded():
+def test_calendar_official_name_loaded():
     cfg = WelcomerConfig.from_dict(
         {
-            "calendars": [
+            "message": [{"name": "default", "subject": "Hi", "body": "Hi"}],
+            "calendar": [
                 {
                     "url": "https://x.com/a.ics",
                     "property": "Chalupa",
                     "official_name": "Chalupa s.r.o.",
+                    "message": "default",
                 }
-            ]
+            ],
         }
     )
     assert cfg.calendars[0].official_name == "Chalupa s.r.o."
 
 
-def test_calendars_official_name_defaults_to_empty():
+def test_calendar_official_name_defaults_to_empty():
     cfg = WelcomerConfig.from_dict(
-        {"calendars": [{"url": "https://x.com/a.ics", "property": "Chalupa"}]}
+        {
+            "message": [{"name": "default", "subject": "Hi", "body": "Hi"}],
+            "calendar": [
+                {"url": "https://x.com/a.ics", "property": "Chalupa", "message": "default"}
+            ],
+        }
     )
     assert cfg.calendars[0].official_name == ""
 
 
 def test_defaults():
     cfg = WelcomerConfig.from_dict({})
-    assert cfg.subject == "Welcome"
-    assert cfg.body == "Hello, {name}!"
     assert cfg.calendars == []
+    assert cfg.messages == []
+
+
+def test_message_name_required():
+    with pytest.raises(ValueError, match="message name is required"):
+        WelcomerConfig.from_dict({"message": [{"subject": "Hi", "body": "Hi"}]})
+
+
+def test_message_requires_subject_and_body():
+    with pytest.raises(ValueError, match="requires subject and body"):
+        WelcomerConfig.from_dict({"message": [{"name": "default", "subject": "Hi"}]})
+
+
+def test_calendar_message_required():
+    with pytest.raises(ValueError, match="calendar message is required"):
+        WelcomerConfig.from_dict(
+            {
+                "message": [{"name": "default", "subject": "Hi", "body": "Hi"}],
+                "calendar": [{"url": "https://example.com/cal.ics"}],
+            }
+        )
+
+
+def test_calendar_message_must_exist():
+    with pytest.raises(ValueError, match="unknown message"):
+        WelcomerConfig.from_dict(
+            {
+                "message": [{"name": "default", "subject": "Hi", "body": "Hi"}],
+                "calendar": [{"url": "https://example.com/cal.ics", "message": "missing"}],
+            }
+        )
+
+
+def test_top_level_subject_body_rejected():
+    with pytest.raises(ValueError, match="top-level subject/body"):
+        WelcomerConfig.from_dict({"subject": "Hi", "body": "Hi"})
+
+
+def test_legacy_calendars_key_rejected():
+    with pytest.raises(ValueError, match=r"\[\[calendars\]\]"):
+        WelcomerConfig.from_dict(
+            {
+                "message": [{"name": "default", "subject": "Hi", "body": "Hi"}],
+                "calendars": [{"url": "https://example.com/cal.ics", "message": "default"}],
+            }
+        )
 
 
 def test_from_file(tmp_path):
     toml = tmp_path / "config.toml"
     toml.write_text(
-        'subject = "Loaded"\nbody = "Hey {name}"\n\n'
-        '[[calendars]]\nurl = "https://example.com/cal.ics"\nproperty = "Test Cal"\n',
+        '[[message]]\nname = "default"\nsubject = "Loaded"\nbody = "Hey {name}"\n\n'
+        '[[calendar]]\nurl = "https://example.com/cal.ics"\nproperty = "Test Cal"\n'
+        'message = "default"\n',
         encoding="utf-8",
     )
     cfg = WelcomerConfig.from_file(toml)
-    assert cfg.subject == "Loaded"
+    assert cfg.messages[0].subject == "Loaded"
     assert cfg.calendars[0].url == "https://example.com/cal.ics"
 
 
 def test_from_file_name_key(tmp_path):
-    """Old config with 'name =' in [[calendars]] still loads."""
+    """Calendar property still accepts the legacy 'name =' key."""
     toml = tmp_path / "config.toml"
     toml.write_text(
-        '[[calendars]]\nurl = "https://example.com/cal.ics"\nname = "Legacy Cal"\n',
+        '[[message]]\nname = "default"\nsubject = "Hi"\nbody = "Hi"\n\n'
+        '[[calendar]]\nurl = "https://example.com/cal.ics"\nname = "Legacy Cal"\n'
+        'message = "default"\n',
         encoding="utf-8",
     )
     cfg = WelcomerConfig.from_file(toml)

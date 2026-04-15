@@ -2,13 +2,18 @@
 
 from datetime import date
 
-from welcomer.config import WelcomerConfig
+from welcomer.config import MessageConfig, WelcomerConfig
 from welcomer.core import _render, build_welcomes
 from welcomer.ical import Recipient
 
 
 def make_cfg(**kwargs) -> WelcomerConfig:
-    defaults = {"subject": "Welcome, {{ name }}!", "body": "Hi {{ name }}."}
+    defaults = {
+        "messages": [
+            MessageConfig(name="default", subject="Welcome, {{ name }}!", body="Hi {{ name }}.")
+        ],
+        "calendars": [],
+    }
     defaults.update(kwargs)
     return WelcomerConfig(**defaults)
 
@@ -181,7 +186,12 @@ def test_jinja2_multiline_block():
 
 
 def test_build_welcomes_subject_and_body():
-    cfg = make_cfg(subject="Hi {{ name }}", body="Welcome {{ email }}")
+    cfg = WelcomerConfig(
+        messages=[
+            MessageConfig(name="default", subject="Hi {{ name }}", body="Welcome {{ email }}")
+        ],
+        calendars=[],
+    )
     results = build_welcomes(cfg, [make_recipient()])
     assert results[0].subject == "Hi Alice"
     assert results[0].body == "Welcome alice@example.com"
@@ -215,7 +225,12 @@ def test_build_welcomes_not_dry_run_by_default():
 
 
 def test_build_welcomes_result_fields():
-    cfg = make_cfg(subject="Hello {{ name }}", body="Welcome {{ email }}")
+    cfg = WelcomerConfig(
+        messages=[
+            MessageConfig(name="default", subject="Hello {{ name }}", body="Welcome {{ email }}")
+        ],
+        calendars=[],
+    )
     r = make_recipient(name="Alice", email="alice@example.com")
     result = build_welcomes(cfg, [r])[0]
     assert result.recipient == "Alice"
@@ -226,10 +241,28 @@ def test_build_welcomes_result_fields():
 
 def test_build_welcomes_jinja2_conditional_in_subject():
     cfg = make_cfg(
-        subject="Hi {{ name }}{% if phone %} ({{ phone }}){% endif %}",
-        body=".",
+        messages=[
+            MessageConfig(
+                name="default",
+                subject="Hi {{ name }}{% if phone %} ({{ phone }}){% endif %}",
+                body=".",
+            )
+        ]
     )
     with_phone = build_welcomes(cfg, [make_recipient(phone="+123")])[0]
     without_phone = build_welcomes(cfg, [make_recipient()])[0]
     assert with_phone.subject == "Hi Alice (+123)"
     assert without_phone.subject == "Hi Alice"
+
+
+def test_build_welcomes_uses_named_message_for_calendar():
+    cfg = WelcomerConfig(
+        messages=[
+            MessageConfig(name="default", subject="Hello {{ name }}", body="Default"),
+            MessageConfig(name="vip", subject="VIP {{ name }}", body="VIP body"),
+        ],
+        calendars=[],
+    )
+    result = build_welcomes(cfg, [make_recipient(extra={"message": "vip"})])[0]
+    assert result.subject == "VIP Alice"
+    assert result.body == "VIP body"

@@ -65,13 +65,22 @@ def build_welcomes(
     recipients: list[Recipient],
     dry_run: bool = False,
 ) -> list[WelcomeResult]:
-    return [
-        WelcomeResult(
-            recipient=recipient.name,
-            email=recipient.email,
-            subject=_render(config.subject, recipient),
-            body=_render(config.body, recipient),
-            dry_run=dry_run,
+    message_map = {message.name: message for message in config.messages}
+    default_message = message_map.get("default") or next(iter(message_map.values()), None)
+    if default_message is None:
+        raise ValueError("no messages configured")
+    results = []
+    for recipient in recipients:
+        # Recipients inherit the calendar's message; tests that call this directly
+        # fall back to the default message.
+        message = message_map.get(recipient.extra.get("message", ""), default_message)
+        results.append(
+            WelcomeResult(
+                recipient=recipient.name,
+                email=recipient.email,
+                subject=_render(message.subject, recipient),
+                body=_render(message.body, recipient),
+                dry_run=dry_run,
+            )
         )
-        for recipient in recipients
-    ]
+    return results

@@ -14,6 +14,14 @@ class CalendarConfig:
     property: str = ""  # accommodation/property name
     official_name: str = ""  # official/legal property name for templates
     provider: str = ""
+    message: str = ""
+
+
+@dataclass
+class MessageConfig:
+    name: str
+    subject: str
+    body: str
 
 
 @dataclass
@@ -54,13 +62,12 @@ class SmtpConfig:
 
 @dataclass
 class WelcomerConfig:
-    subject: str = "Welcome"
-    body: str = "Hello, {name}!"
     date_format: str = "%Y-%m-%d"
     days: int | None = None
     advance: int = 14
     send_without_email: bool = False
     smtp: SmtpConfig | None = None
+    messages: list[MessageConfig] = field(default_factory=list)
     calendars: list[CalendarConfig] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -72,25 +79,48 @@ class WelcomerConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> WelcomerConfig:
-        calendars = [
-            CalendarConfig(
-                url=c["url"],
-                # Accept "property" key; fall back to "name" for backward compat
-                property=c.get("property", c.get("name", "")),
-                official_name=c.get("official_name", ""),
-                provider=c.get("provider", ""),
+        if "subject" in data or "body" in data:
+            raise ValueError("top-level subject/body are no longer supported")
+        if "calendars" in data:
+            raise ValueError("[[calendars]] is no longer supported; use [[calendar]]")
+
+        messages = []
+        for m in data.get("message", []):
+            name = m.get("name", "")
+            if not name:
+                raise ValueError("message name is required")
+            subject = m.get("subject", "")
+            body = m.get("body", "")
+            if not subject or not body:
+                raise ValueError(f"message '{name}' requires subject and body")
+            messages.append(MessageConfig(name=name, subject=subject, body=body))
+
+        message_names = {m.name for m in messages}
+        calendars = []
+        for c in data.get("calendar", []):
+            message = c.get("message", "")
+            if not message:
+                raise ValueError("calendar message is required")
+            if message not in message_names:
+                raise ValueError(f"unknown message: {message}")
+            calendars.append(
+                CalendarConfig(
+                    url=c["url"],
+                    # Accept "property" key; fall back to "name" for backward compat
+                    property=c.get("property", c.get("name", "")),
+                    official_name=c.get("official_name", ""),
+                    provider=c.get("provider", ""),
+                    message=message,
+                )
             )
-            for c in data.get("calendars", [])
-        ]
         smtp_data = data.get("smtp")
         return cls(
-            subject=data.get("subject", "Welcome"),
-            body=data.get("body", "Hello, {name}!"),
             date_format=data.get("date_format", "%Y-%m-%d"),
             days=data.get("days"),
             advance=data.get("advance", 14),
             send_without_email=data.get("send_without_email", False),
             smtp=SmtpConfig.from_dict(smtp_data) if smtp_data is not None else None,
+            messages=messages,
             calendars=calendars,
             raw=data,
         )

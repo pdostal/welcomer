@@ -247,6 +247,7 @@ def _sent_marker(
 @dataclass
 class _TableRow:
     display_name: str
+    countable: bool
     start_str: str
     end_str: str
     duration_str: str
@@ -279,6 +280,9 @@ def _build_table_rows(
         end_str = rec.end.strftime(cfg.date_format) if rec.end else ""
         duration_str = f"{(rec.end - rec.start).days} days" if rec.start and rec.end else ""
         prop_col = f"{prop} · {prov}" if prop and prov else prop or prov
+        active_today = (
+            rec.start is not None and rec.end is not None and rec.start <= today <= rec.end
+        )
         past_checkin = rec.start is not None and rec.start < today
         eligible = rec.start is not None and today <= rec.start <= today + timedelta(
             days=effective_advance
@@ -290,6 +294,7 @@ def _build_table_rows(
         rows.append(
             _TableRow(
                 display_name=display_name,
+                countable=bool(rec.start) and not active_today,
                 start_str=start_str,
                 end_str=end_str,
                 duration_str=duration_str,
@@ -447,6 +452,7 @@ def main(
                 r.extra["property"] = cal.property
                 r.extra["official_name"] = cal.official_name
                 r.extra["provider"] = cal.provider
+                r.extra["message"] = cal.message
             provider_str = f" · {cal.provider}" if cal.provider else ""
             if not silent:
                 console.print(
@@ -467,7 +473,7 @@ def main(
 
         if not cfg.calendars:
             console.print(
-                "[yellow]No calendars configured. Add [[calendars]] entries in config.toml.[/]"
+                "[yellow]No calendars configured. Add [[calendar]] entries in config.toml.[/]"
             )
             raise SystemExit(0)
 
@@ -484,6 +490,7 @@ def main(
                     r.extra["property"] = cal.property
                     r.extra["official_name"] = cal.official_name
                     r.extra["provider"] = cal.provider
+                    r.extra["message"] = cal.message
                 provider_str = f" · {cal.provider}" if cal.provider else ""
                 cache_str = " (cached)" if from_cache else ""
                 if not silent:
@@ -544,6 +551,8 @@ def main(
     send_without_email = cfg.send_without_email
 
     show_guests = any(row.guests_str for row in rows)
+    countable_rows = [row for row in rows if row.countable]
+    w_count = max(len(str(len(countable_rows))), len("#"))
 
     _dates = [
         f"{r.start_str} → {r.end_str}" if r.start_str and r.end_str else r.start_str or r.end_str
@@ -563,6 +572,7 @@ def main(
 
     header = (
         f"[bold dim]"
+        f"{'#':<{w_count}}  "
         f"{'👤 Name':<{w_name - 1}}  "
         f"{'📅 Date':<{w_date - 1}}  "
         f"{'⏳':<{w_dur - 1}}  "
@@ -577,6 +587,7 @@ def main(
     header += "[/bold dim]"
     console.print(header)
 
+    count = 0
     for row in rows:
         date_color = "red" if id(row.recipient) in overlapping_recipients else "cyan"
         already_sent = _sent_key(row.recipient, row.prop) in sent_keys
@@ -589,7 +600,13 @@ def main(
         marker = _sent_marker(
             row.email, already_sent, row.eligible, row.past_checkin, send_without_email
         )
+        if row.countable:
+            count += 1
+            count_col = f"{count:<{w_count}}"
+        else:
+            count_col = " " * w_count
         line = (
+            f"{count_col}  "
             f"[bold {name_color}]{row.display_name:<{w_name}}[/bold {name_color}]"
             f"  [{date_color}]{date_col:<{w_date}}[/{date_color}]"
             f"  [{date_color}]{row.duration_str:<{w_dur}}[/{date_color}]"

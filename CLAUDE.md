@@ -49,9 +49,9 @@ subject + markdown body per recipient, and prints the result.
 
 Data flows through three layers:
 
-1. **`config.py`** — loads `config.toml` (TOML) into `WelcomerConfig`, which holds `subject`, `body`
-   (markdown template), `days` (optional filter), `send_without_email` (bool), and a list of
-   `CalendarConfig` (url + property + official_name + provider).
+1. **`config.py`** — loads `config.toml` (TOML) into `WelcomerConfig`, which holds `messages` (named
+   subject/body templates), `days` (optional filter), `send_without_email` (bool), and a list of
+   `CalendarConfig` (url + property + official_name + provider + message).
 
 1. **`ical.py`** — fetches each calendar URL with `httpx`, parses with `icalendar`, and returns
    `Recipient` objects (name, email, phone, start, end, extra). Extracts from `ATTENDEE` entries;
@@ -90,9 +90,10 @@ Config is loaded from the first path that exists, in priority order:
 1. `~/.config/welcomer/config.toml`
 
 Both paths are excluded from git. Create one of these files (see README.md for an example). Keys:
-`subject`, `body` (multiline TOML string, markdown), `days` (optional int), `send_without_email`
-(bool, default false), `[[calendars]]` array with `url`, `property` (accommodation name; `name` is
-also accepted for backward compat), `official_name` (optional legal name), and `provider`.
+`[[message]]` array with `name`, `subject`, `body` (markdown template), `days` (optional int),
+`send_without_email` (bool, default false), `[[calendar]]` array with `url`, `message`, `property`
+(accommodation name; `name` is also accepted for backward compat), `official_name` (optional legal
+name), and `provider`.
 
 Message templates use Jinja2 syntax (`{{ variable }}`, `{% if %}...{% endif %}`, filters). Available
 variables: `name`, `email`, `phone`, `start`, `end`, `adults`, `kids`, `property`, `official_name`

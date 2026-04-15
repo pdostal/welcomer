@@ -55,7 +55,26 @@ Config is loaded from the first path that exists:
 Example config:
 
 ```toml
+[[message]]
+name = "default"
 subject = "Reservation confirmed – {{ name }}"
+body = """
+Dear {{ name }},
+
+Thank you for your reservation from {{ start }} to {{ end }} at {{ official_name }}.
+{% if adults %}We look forward to hosting you ({{ adults }} adults{% if kids %}, {{ kids }} kids{% endif %}).
+{% endif %}
+If you have any questions, reply to this email.
+"""
+
+[[message]]
+name = "vip"
+subject = "VIP reservation for {{ name }}"
+body = """
+Hi {{ name }},
+
+You’re on the VIP list for {{ official_name }}.
+"""
 
 # Only show reservations starting within this many days from today (optional)
 # days = 30
@@ -65,15 +84,6 @@ subject = "Reservation confirmed – {{ name }}"
 
 # Send to CC/BCC even when the guest email is unknown (default: false)
 # send_without_email = false
-
-body = """
-Dear {{ name }},
-
-Thank you for your reservation from {{ start }} to {{ end }} at {{ official_name }}.
-{% if adults %}We look forward to hosting you ({{ adults }} adults{% if kids %}, {{ kids }} kids{% endif %}).
-{% endif %}
-If you have any questions, reply to this email.
-"""
 
 [smtp]
 host = "smtp.example.com"
@@ -87,30 +97,33 @@ password = "secret"
 tls = true      # use STARTTLS (port 587)
 # ssl = true    # use SSL/TLS instead (port 465)
 
-[[calendars]]
+[[calendar]]
 property = "My Property"
 official_name = "My Property s.r.o."  # optional: legal/official name for templates
 provider = "BookingProvider"
 url = "https://example.com/calendar.ics"
-```
+message = "default"
 
-**Backward compatibility:** the `name` key in `[[calendars]]` is still accepted and maps to
-`property`. Existing configs do not need to be updated.
+[[calendar]]
+property = "My Property"
+provider = "BookingProvider"
+url = "https://example.com/vip-calendar.ics"
+message = "vip"
+```
 
 ### Template variables
 
 Templates use [Jinja2](https://jinja.palletsprojects.com/) syntax: `{{ variable }}`,
 `{% if condition %}...{% endif %}`, filters (`| upper`, `| default('fallback', true)`).
 
-| Variable | Description | Empty when | | -------------- |
--------------------------------------------- | -------------------------- | | `name` | Guest name |
-— | | `email` | Guest email address | no email on reservation | | `phone` | Guest phone number | no
-phone on reservation | | `start` | Check-in date (formatted per `date_format`) | — | | `end` |
-Check-out date (formatted per `date_format`) | — | | `adults` | Number of adult guests | not
-provided by calendar | | `kids` | Number of child guests | not provided by calendar | | `property` |
-Property name (from `[[calendars]]`) | not configured | | `official_name` | Legal/official property
-name | falls back to `property` | | `provider` | Booking provider name | not configured | |
-`summary` | Raw iCal event summary | — |
+| Variable | Description | Empty when | | --- | --- | --- | | `name` | Guest name | — | | `email` |
+Guest email address | no email on reservation | | `phone` | Guest phone number | no phone on
+reservation | | `start` | Check-in date (formatted per `date_format`) | — | | `end` | Check-out date
+(formatted per `date_format`) | — | | `adults` | Number of adult guests | not provided by calendar |
+| `kids` | Number of child guests | not provided by calendar | | `property` | Property name (from
+`[[calendar]]`) | not configured | | `official_name` | Legal/official property name | falls back to
+`property` | | `provider` | Booking provider name | not configured | | `summary` | Raw iCal event
+summary | — |
 
 **Jinja2 examples:**
 
