@@ -309,7 +309,7 @@ def test_count_column_skips_active_and_same_day_reservations(tmp_path):
         ),
         Recipient(
             name="CheckinToday",
-            email="checkin@example.com",
+            email="arrival@example.com",
             start=today,
             end=today + timedelta(days=2),
         ),
