@@ -247,7 +247,7 @@ def test_days_filter_includes_upcoming():
     result = runner.invoke(main, ["--dry-run", "--test-config", "--days", "55"])
     assert result.exit_code == 0
     # Overlap warning may mention Anna even when she's filtered from the table —
-    # check only the table rows (after the header line).
+    # inspect only the table rows (after the header line).
     table = result.output[result.output.index("👤 Name") :]
     assert "Radka" in table
     assert "Anna" not in table
