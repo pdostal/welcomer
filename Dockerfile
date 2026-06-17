@@ -4,7 +4,7 @@ COPY . .
 RUN uv build --wheel
 
 # checkov:skip=CKV_DOCKER_2:CLI tool - HEALTHCHECK not applicable
-FROM python:3.14-slim
+FROM python:3.14.6-slim
 COPY --from=builder /build/dist/*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/*.whl && rm /tmp/*.whl \
     && useradd --no-create-home --shell /bin/false welcomer
