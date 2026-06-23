@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
-from welcomer.cache import CACHE_TTL, _cache_path, get_cached, save_cache
+from welcomer.cache import CACHE_TTL, _cache_key, _cache_path, get_cached, save_cache
 from welcomer.ical import fetch_recipients
 
 SAMPLE_URL = "https://example.com/calendar.ics"
@@ -17,12 +18,20 @@ SAMPLE_DATA = b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
 # ---------------------------------------------------------------------------
 
 
-def test_cache_path_is_deterministic(tmp_path):
-    assert _cache_path(SAMPLE_URL, tmp_path) == _cache_path(SAMPLE_URL, tmp_path)
+def test_cache_path_includes_utc_timestamp_and_hash(tmp_path):
+    now = datetime(2026, 7, 22, 17, 35, 42, tzinfo=UTC)
+
+    assert _cache_path(SAMPLE_URL, tmp_path, now).name == (
+        f"20260722173542_{_cache_key(SAMPLE_URL)}.ics"
+    )
 
 
 def test_cache_path_differs_for_different_urls(tmp_path):
-    assert _cache_path(SAMPLE_URL, tmp_path) != _cache_path("https://other.com/cal.ics", tmp_path)
+    now = datetime(2026, 7, 22, 17, 35, 42, tzinfo=UTC)
+
+    assert _cache_path(SAMPLE_URL, tmp_path, now) != _cache_path(
+        "https://other.com/cal.ics", tmp_path, now
+    )
 
 
 def test_cache_path_has_ics_extension(tmp_path):
@@ -51,13 +60,14 @@ def test_save_creates_cache_directory(tmp_path):
 
 def test_get_cached_returns_none_when_expired(tmp_path):
     save_cache(SAMPLE_URL, SAMPLE_DATA, cache_dir=tmp_path)
-    path = _cache_path(SAMPLE_URL, tmp_path)
+    path = next(tmp_path.glob(f"*_{_cache_key(SAMPLE_URL)}.ics"))
     # backdate mtime beyond TTL
     old_time = time.time() - CACHE_TTL - 1
     import os
 
     os.utime(path, (old_time, old_time))
     assert get_cached(SAMPLE_URL, cache_dir=tmp_path) is None
+    assert path.exists()
 
 
 def test_get_cached_returns_data_when_fresh(tmp_path):
@@ -66,9 +76,25 @@ def test_get_cached_returns_data_when_fresh(tmp_path):
     assert get_cached(SAMPLE_URL, cache_dir=tmp_path) == SAMPLE_DATA
 
 
-def test_save_cache_overwrites_existing(tmp_path):
-    save_cache(SAMPLE_URL, b"old", cache_dir=tmp_path)
-    save_cache(SAMPLE_URL, b"new", cache_dir=tmp_path)
+def test_save_cache_keeps_existing_snapshots(tmp_path):
+    with patch("welcomer.cache.datetime") as mock_datetime:
+        mock_datetime.now.return_value = datetime(2026, 7, 22, 17, 35, 42, tzinfo=UTC)
+        save_cache(SAMPLE_URL, b"old", cache_dir=tmp_path)
+        mock_datetime.now.return_value = datetime(2026, 7, 22, 17, 35, 43, tzinfo=UTC)
+        save_cache(SAMPLE_URL, b"new", cache_dir=tmp_path)
+
+    paths = sorted(tmp_path.glob(f"*_{_cache_key(SAMPLE_URL)}.ics"))
+    assert len(paths) == 2
+    assert get_cached(SAMPLE_URL, cache_dir=tmp_path) == b"new"
+
+
+def test_get_cached_uses_newest_snapshot(tmp_path):
+    with patch("welcomer.cache.datetime") as mock_datetime:
+        mock_datetime.now.return_value = datetime(2026, 7, 22, 17, 35, 42, tzinfo=UTC)
+        save_cache(SAMPLE_URL, b"old", cache_dir=tmp_path)
+        mock_datetime.now.return_value = datetime(2026, 7, 22, 17, 35, 43, tzinfo=UTC)
+        save_cache(SAMPLE_URL, b"new", cache_dir=tmp_path)
+
     assert get_cached(SAMPLE_URL, cache_dir=tmp_path) == b"new"
 
 

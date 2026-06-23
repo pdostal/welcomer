@@ -200,8 +200,10 @@ URLs immediately:
 uv run welcomer --dry-run --force-refresh
 ```
 
-The cache directory is created automatically. Each URL is stored as a separate `<sha256-of-url>.ics`
-file. Local file paths and `--test-config` are never cached.
+The cache directory is created automatically. Each remote fetch is stored as a timestamped snapshot:
+`<YYYYMMDDHHMMSS>_<sha256-of-url>.ics`, using UTC for the timestamp. Welcomer reads the newest fresh
+snapshot for each URL. Expired snapshots are ignored but left on disk. Local file paths and
+`--test-config` are never cached.
 
 ## Multi-property reservations
 

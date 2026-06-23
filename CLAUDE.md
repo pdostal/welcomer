@@ -59,10 +59,11 @@ Data flows through three layers:
    `Telefon:`). Phone is extracted from `Description` for all paths. Remote fetches are cached via
    `cache.py`.
 
-1. **`cache.py`** — disk cache for remote iCal URLs. Stores raw `.ics` bytes in
-   `~/.config/welcomer/cache/<sha256-of-url>.ics`. TTL is 5 hours (checked via `mtime`). Provides
-   `get_cached(url)` and `save_cache(url, data)`; both accept an optional `cache_dir` override (used
-   in tests).
+1. **`cache.py`** — disk cache for remote iCal URLs. Stores raw `.ics` bytes in timestamped UTC
+   snapshots named `~/.config/welcomer/cache/<YYYYMMDDHHMMSS>_<sha256-of-url>.ics`. TTL is 5 hours
+   (checked via `mtime` on the newest snapshot). Expired snapshots are ignored but left on disk.
+   Provides `get_cached(url)` and `save_cache(url, data)`; both accept an optional `cache_dir`
+   override (used in tests).
 
 1. **`smtp.py`** — email sending via stdlib `smtplib`. Single function
    `send_email(cfg, to, subject, body)`. Supports plain SMTP, STARTTLS (`tls=true`), and SSL
