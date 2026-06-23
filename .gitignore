@@ -26,4 +26,5 @@ config.toml
 htmlcov/
 
 .claude/
+.opencode/
 
